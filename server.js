@@ -17,7 +17,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.3.0",
+  version: "1.4.0",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -428,9 +428,15 @@ function decodeWidgetUrl(encoded) {
 function isAllowedWidgetUrl(value) {
   try {
     const u = new URL(value);
-    return u.protocol === "https:" &&
-      u.hostname === "streamfree.vip" &&
-      u.pathname.startsWith("/embed/");
+    const base = new URL(BASE_URL);
+    if (u.protocol !== "https:") return false;
+
+    // Primary: embed the original YanHH3D episode page so its own
+    // JavaScript loads StreamFree with the correct YanHH3D referrer.
+    if (u.hostname === base.hostname) return true;
+
+    // Legacy fallback for previously-issued StreamFree widget URLs.
+    return u.hostname === "streamfree.vip" && u.pathname.startsWith("/embed/");
   } catch {
     return false;
   }
