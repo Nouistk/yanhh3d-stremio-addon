@@ -466,6 +466,92 @@ app.get("/stream/series/:id.json", async (req, res) => {
   }
 });
 
+
+const CTG = "https://ctg.ntl-nuvi.pp.ua";
+const TORRENTIO = "https://torrentio.strem.fun";
+const COMET = "https://comet.elfhosted.com";
+
+async function vnJson(url) {
+  const r = await fetch(url, { headers: { "User-Agent": "Stremio-Catalog-VN/1.0", "Accept": "application/json" } });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+
+async function vnMeta(type, id) {
+  try { return await vnJson(CTG + "/meta/" + encodeURIComponent(type) + "/" + encodeURIComponent(id) + ".json"); }
+  catch { return null; }
+}
+
+function vnImdb(data, id) {
+  if (/^tt\d+/.test(String(id))) return String(id).split(":")[0];
+  const m = data?.meta || data || {};
+  return m.imdb_id || m.imdbId || m.imdb || m.ids?.imdb || m.external_ids?.imdb_id || null;
+}
+
+async function vnStreams(base, type, id) {
+  try {
+    const data = await vnJson(base + "/stream/" + encodeURIComponent(type) + "/" + encodeURIComponent(id) + ".json");
+    return Array.isArray(data.streams) ? data.streams : [];
+  } catch { return []; }
+}
+
+app.get("/vn/manifest.json", async (_, res) => {
+  try {
+    const m = await vnJson(CTG + "/manifest.json");
+    m.id = "com.nouistk.catalogvn-streams";
+    m.name = "Catalog VN • Torrentio + Comet";
+    m.description = "Catalog VN với nguồn phát Torrentio và Comet.";
+    const types = (m.types || []).filter(t => ["movie","series","anime"].includes(t));
+    m.resources = [
+      ...(m.resources || []),
+      { name: "stream", types, idPrefixes: m.idPrefixes || [] }
+    ];
+    res.json(m);
+  } catch (e) {
+    res.status(502).json({ error: "Catalog VN unavailable" });
+  }
+});
+
+app.use("/vn", async (req, res, next) => {
+  try {
+    const p = req.path.split("/").filter(Boolean);
+    if (p.length < 3 || p[0] !== "stream") return next();
+    const type = decodeURIComponent(p[1]);
+    const last = p[p.length - 1];
+    const id = decodeURIComponent(last.endsWith(".json") ? last.slice(0, -5) : last);
+
+    const meta = await vnMeta(type, id);
+    const imdb = vnImdb(meta, id);
+    if (!imdb) return res.json({ streams: [] });
+
+    let providerId = imdb;
+    if (type === "series") {
+      const parts = String(id).split(":");
+      const nums = parts.filter(x => /^\d+$/.test(x)).map(Number);
+      if (nums.length >= 2) providerId = imdb + ":" + nums[nums.length - 2] + ":" + nums[nums.length - 1];
+    }
+
+    const [torrentio, comet] = await Promise.all([
+      vnStreams(TORRENTIO, type, providerId),
+      vnStreams(COMET, type, providerId)
+    ]);
+
+    const seen = new Set();
+    const streams = [...torrentio, ...comet].filter(s => {
+      const key = String(s.url || s.infoHash || s.externalUrl || s.name || "");
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    res.set("Cache-Control", "public, max-age=30");
+    res.json({ streams });
+  } catch (e) {
+    console.error("[VN STREAM]", e);
+    res.status(502).json({ streams: [] });
+  }
+});
+
 app.get("/", (_, res) => {
   res.type("html").send(
     "<h1>YanHH3D Stremio Add-on</h1><p><a href='/manifest.json'>Install manifest</a></p>"
