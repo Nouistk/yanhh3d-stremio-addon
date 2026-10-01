@@ -51,10 +51,16 @@ async function getPlayerFrames(episodeUrl, baseUrl) {
     const frame = $p("iframe").first().attr("src");
     if (!frame) continue;
 
+    const frameUrl = new URL(frame, u.href).href;
+    if (!/^https:\/\/streamfree\.vip\/embed\//i.test(frameUrl)) continue;
+
+    const widgetId = Buffer.from(frameUrl, "utf8").toString("base64url");
     results.push({
       name: "YanHH3D • " + label,
       title: label,
-      playerFrameUrl: new URL(frame, u.href).href
+      externalUrl: frameUrl,
+      widgetPlayer: baseUrl + "/widget/" + widgetId + ".html",
+      widgetPlayerStates: ["replaceplayer"]
     });
   }
 
