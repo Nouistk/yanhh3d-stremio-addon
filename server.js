@@ -641,3 +641,5 @@ runDiagOnce();
 app.listen(PORT, "0.0.0.0", () => {
   console.log("YanHH3D Stremio addon listening on port " + PORT);
 });
+
+diagnoseLivePlayer();
