@@ -531,6 +531,7 @@ async function diagnoseLivePlayer() {
     const $ = cheerio.load(html);
     const serverButtons = $("#list_sv .btn3dsv").map((_, el) => ({ text: clean($(el).text()), type: $(el).attr("data-type") || "", id: $(el).attr("id") || "" })).get();
     console.log("[DIAG] SERVER_BUTTONS=" + JSON.stringify(serverButtons));
+    const inline = $("script:not([src])").map((_, el) => $(el).html() || "").get().join("\n");
     try {
       const fn = "load" + "Player";
       const pos = inline.indexOf("function " + fn);
@@ -562,7 +563,6 @@ async function diagnoseLivePlayer() {
     console.log("[DIAG] scripts=" + scripts.length);
     console.log("[DIAG] script_urls=" + JSON.stringify(scripts));
 
-    const inline = $("script:not([src])").map((_, el) => $(el).html() || "").get().join("\n");
     const inlineHits = [];
     for (const term of ["ajax", "list_sv", "sv_link", "data-post-id", "m3u8", "player"]) {
       const p = inline.toLowerCase().indexOf(term);
