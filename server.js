@@ -556,6 +556,19 @@ async function diagnoseLivePlayer() {
         const px = cheerio.load(pr.text);
         console.log("[DIAG] PLAYER status=" + pr.status + " len=" + pr.text.length + " iframe=" + JSON.stringify(px("iframe").map((_,el)=>px(el).attr("src")).get()));
         console.log("[DIAG] PLAYER snippet=" + pr.text.slice(0,5000));
+        const iframeSrc = px("iframe").first().attr("src");
+        if (iframeSrc) {
+          try {
+            const er = await fetchWithTimeout(iframeSrc, episodeUrl, 10000);
+            const ex = cheerio.load(er.text);
+            const mediaUrls = [...er.text.matchAll(/https?:\\/\\/[^"'<\\s]+\\.(?:m3u8|mp4)(?:\\?[^"'<\\s]*)?/gi)].map(m => m[0]).slice(0,20);
+            const dataAttrs = [...er.text.matchAll(/data-[a-z0-9_-]+=["'][^"']{1,300}["']/gi)].slice(0,30).map(m => m[0]);
+            console.log("[DIAG] IFRAME status=" + er.status + " len=" + er.text.length + " media=" + JSON.stringify(mediaUrls) + " dataAttrs=" + JSON.stringify(dataAttrs));
+            console.log("[DIAG] IFRAME title=" + ex("title").text());
+          } catch(e) {
+            console.log("[DIAG] IFRAME probe error=" + e.message);
+          }
+        }
       }
     } catch(e) {
       console.log("[DIAG] PLAYER probe error=" + e.message);
