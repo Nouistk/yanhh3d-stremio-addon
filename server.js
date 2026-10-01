@@ -567,7 +567,47 @@ async function runStreamFreeDiagnostic() {
           if (p3 >= 0) console.log("[SF-DIAG] htmlContext " + term + "=" + JSON.stringify(body.slice(Math.max(0,p3-300), Math.min(body.length,p3+1200))));
         }
         console.log("[SF-DIAG] m3u8Hits=" + JSON.stringify(links.slice(0, 20)));
+
         console.log("[SF-DIAG] scriptUrls=" + JSON.stringify(scripts.slice(0, 20)));
+
+        for (const script of scripts.slice(0, 10)) {
+          try {
+            const abs = new URL(script, url).href;
+            if (!/app\.e2c7174e\.js$/i.test(abs)) continue;
+            const sr = await fetch(abs, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+                "Referer": url,
+                "Accept": "*/*"
+              },
+              redirect: "follow"
+            });
+            const js = await sr.text();
+
+            const terms = ["data-nonce", "hrm-player", "fetch(", "XMLHttpRequest", "/api/", ".php", "m3u8", "nonce", "checksum", "data-uip", "video-id", "stream"];
+            const contexts = [];
+            for (const term of terms) {
+              const pos = js.toLowerCase().indexOf(term.toLowerCase());
+              if (pos >= 0) {
+                contexts.push({
+                  term,
+                  context: js.slice(Math.max(0, pos - 400), Math.min(js.length, pos + 1400))
+                });
+              }
+            }
+            console.log("[SF-DIAG] appContexts=" + JSON.stringify(contexts));
+
+            const chunks = js.split(/["']/g);
+            const candidates = chunks
+              .filter(s => /^(https?:\/\/|\/)/i.test(s) || /api|player|video|stream|m3u8|\.php/i.test(s))
+              .filter((s, i, a) => a.indexOf(s) === i)
+              .slice(0, 100);
+            console.log("[SF-DIAG] appStrings=" + JSON.stringify(candidates));
+          } catch (e) {
+            console.log("[SF-DIAG] appScanError=" + (e.message || String(e)));
+          }
+        }
+
 
         for (const script of scripts.slice(0, 10)) {
           try {
@@ -585,20 +625,6 @@ async function runStreamFreeDiagnostic() {
             const hits = ["m3u8", "hls", "master", "manifest", "source", "stream"].filter(x => low.includes(x));
             if (hits.length) {
               console.log("[SF-DIAG] script=" + abs + " status=" + sr.status + " len=" + text.length + " hits=" + hits.join(","));
-              if (/app\\.e2c7174e\\.js$/.test(abs)) {
-                const stringHits = [...text.matchAll(/["']([^"'\\\\]{1,180})["']/g)]
-                  .map(m => m[1])
-                  .filter(s => /api|player|video|nonce|m3u8|stream|source|checksum|uip|hrm|ajax|\\.php|\\/api\\//i.test(s))
-                  .filter((s, i, a) => a.indexOf(s) === i)
-                  .slice(0, 80);
-                console.log("[SF-DIAG] stringHits=" + JSON.stringify(stringHits));
-                const fetchPositions = [];
-                for (const term of ["fetch(", "XMLHttpRequest", "axios", "/api/", ".php", "data-nonce", "hrm-player"]) {
-                  const pos = text.toLowerCase().indexOf(term.toLowerCase());
-                  if (pos >= 0) fetchPositions.push({term, context:text.slice(Math.max(0,pos-600), Math.min(text.length,pos+1800))});
-                }
-                console.log("[SF-DIAG] codeHits=" + JSON.stringify(fetchPositions));
-              }
               for (const term of ["m3u8", "hls", "playlist", "sources", "jwplayer"]) {
                 const low2 = text.toLowerCase();
                 let pos = low2.indexOf(term);
