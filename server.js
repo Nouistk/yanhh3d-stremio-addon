@@ -79,7 +79,7 @@ async function getHtml(url) {
   return html;
 }
 
-function parseCards(html) {
+async function parseCards(html) {
   const $ = cheerio.load(html);
   const items = [];
   const seen = new Set();
