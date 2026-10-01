@@ -250,7 +250,10 @@ function extractStreams(html) {
   return streams;
 }
 
-app.get("/manifest.json", (_, res) => {\n  res.set("Cache-Control", "no-store");\n  res.type("application/json").send(JSON.stringify(manifest));\n});
+app.get("/manifest.json", (_, res) => {
+  res.set("Cache-Control", "no-store");
+  res.type("application/json").send(JSON.stringify(manifest));
+});
 
 app.get("/catalog/series/yanhh3d.json", async (req, res) => {
   try {
