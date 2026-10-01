@@ -223,18 +223,25 @@ async function parseSeries(url, slug) {
     }
   });
 
-  let linkEls = $w("a[href]").toArray();
+  let links = $w("a[href]");
   if (preferredPaneIds.length) {
     const collected = [];
     for (const id of preferredPaneIds) {
-      collected.push(...$w("#" + id + " a[href]").toArray());
+      $w("#" + id + " a[href]").each((_, el) => collected.push(el));
     }
-    if (collected.length) linkEls = collected;
+    if (collected.length) links = cheerio.load("<div></div>")([]); // replaced below
+    if (collected.length) {
+      const seenEls = new Set();
+      links = { each: (fn) => collected.forEach((el, i) => {
+        const key = el;
+        if (!seenEls.has(key)) { seenEls.add(key); fn(i, el); }
+      }) };
+    }
   } else if (container.length) {
-    linkEls = container.find("a[href]").toArray();
+    links = container.find("a[href]");
   }
 
-  linkEls.forEach((el) => {
+  links.each((_, el) => {
     const href = absoluteUrl($(el).attr("href"));
     if (!href || !href.startsWith(BASE_URL)) return;
     const text = clean(
@@ -286,53 +293,50 @@ function decodePlayerConfig(value) {
 async function resolveYanSource(sourceUrl, episodeUrl, label) {
   if (!sourceUrl) return null;
 
-  const direct = String(sourceUrl)
-    .trim()
-    .replace(/&amp;/g, "&")
-    .replace(/\\\//g, "/");
-
-  const isMedia = /\.(?:m3u8|mp4)(?:\?|$)/i.test(direct);
-  if (!isMedia) return null;
+  const direct = String(sourceUrl).trim().replace(/&amp;/g, "&").replace(/\\\//g, "/");
+  if (/\.(?:m3u8|mp4)(?:\?|$)/i.test(direct) === false) return null;
 
   try {
+    // YanHH3D's data-src often ends in .m3u8 but returns an HTML player page.
     const body = await getHtmlWithReferer(direct, episodeUrl);
-    const trimmed = body.replace(/^\\uFEFF/, "").trimStart();
-
-    if (trimmed.startsWith("#EXTM3U")) {
-      return { url: direct, name: label || "Direct", quality: inferQuality(label, direct) };
+    if (body.trimStart().startsWith("#EXTM3U")) {
+      return {
+        url: direct,
+        name: label || "Direct",
+        quality: inferQuality(label, direct)
+      };
     }
 
     const $ = cheerio.load(body);
     const obf = $("#player[data-obf]").attr("data-obf") || $("[data-obf]").first().attr("data-obf");
-
     if (obf) {
-      const candidates = [decodePlayerConfig(obf)];
-      try { candidates.push(Buffer.from(obf, "base64url").toString("utf8")); } catch {}
-
-      for (const config of candidates) {
-        const match = String(config || "").match(/"pU"\s*:\s*"([^"]+)"/i);
-        if (match && match[1]) {
-          const playlist = String(match[1]).replace(/\\\//g, "/").replace(/&amp;/g, "&");
-          if (/^https?:\/\//i.test(playlist)) {
-            return { url: playlist, name: label || "Direct", quality: inferQuality(label, playlist) };
-          }
+      const config = decodePlayerConfig(obf);
+      const match = config.match(/"pU"\s*:\s*"([^"]+)"/i);
+      if (match && match[1]) {
+        const playlist = absoluteUrl(match[1].replace(/\\\//g, "/"));
+        if (playlist) {
+          return {
+            url: playlist,
+            name: label || "Direct",
+            quality: inferQuality(label, playlist)
+          };
         }
       }
     }
 
-    const mp4 = body.match(/https?:\/\/[^"'\s<>]+\.mp4(?:\?[^"'\s<>]*)?/i);
+    const mp4 = body.match(/https?:\/\/[^"'\\s<>]+\.mp4(?:\?[^"'\\s<>]*)?/i);
     if (mp4) {
-      return { url: mp4[0], name: label || "Direct", quality: inferQuality(label, mp4[0]) };
+      return {
+        url: mp4[0],
+        name: label || "Direct",
+        quality: inferQuality(label, mp4[0])
+      };
     }
   } catch (e) {
     console.error("resolveYanSource", e);
   }
 
-  return {
-    url: direct,
-    name: (label || "Direct") + " • Direct",
-    quality: inferQuality(label, direct)
-  };
+  return null;
 }
 
 function inferQuality(label, url) {
@@ -372,14 +376,6 @@ async function extractStreams(html, episodeUrl) {
     sources.push({ url, label });
   });
 
-  const rawRe = /data-src\s*=\s*["'](https?:\/\/[^"'<> ]+\.(?:m3u8|mp4)(?:\?[^"'<> ]*)?)["']/gi;
-  for (const match of html.matchAll(rawRe)) {
-    const url = absoluteUrl(match[1].replace(/&amp;/g, "&"));
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
-    sources.push({ url, label: /4k|2160/i.test(match[1]) ? "4K" : "1080" });
-  }
-
   // Fallbacks when YanHH3D changes the player wrapper.
   if (!sources.length) {
     $("[data-src]").each((_, el) => {
@@ -402,6 +398,7 @@ async function extractStreams(html, episodeUrl) {
       title: source.label,
       url: playback.url,
       behaviorHints: {
+        notWebReady: true,
         proxyHeaders: {
           request: {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -459,7 +456,7 @@ app.get("/stream/series/:id.json", async (req, res) => {
     if (!episodeUrl) return res.json({ streams: [] });
 
     const streams = await getPlayerFrames(episodeUrl, BASE_URL);
-    console.log("[STREAM] " + episodeUrl + " -> " + streams.length + " PlayerFrame sources");
+    console.log("[STREAM] PlayerFrame sources:", streams.length);
 
     res.set("Cache-Control", "public, max-age=30");
     res.json({ streams });
@@ -475,189 +472,6 @@ app.get("/", (_, res) => {
   );
 });
 
-
-async function fetchWithTimeout(url, referer, ms = 8000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  try {
-    const r = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-        "Referer": referer,
-        "Accept": "*/*"
-      },
-      signal: controller.signal,
-      redirect: "follow"
-    });
-    return { status: r.status, text: await r.text() };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function diagnoseLivePlayer() {
-  const episodeUrl = BASE_URL + "/tu-tien/muc-than-ky/tap-1.html";
-  console.log("[DIAG] START " + episodeUrl);
-  try {
-    const result = await fetchWithTimeout(episodeUrl, BASE_URL, 10000);
-    const html = result.text;
-    console.log("[DIAG] PAGE status=" + result.status + " html=" + html.length);
-
-    const $ = cheerio.load(html);
-    const serverButtons = $("#list_sv .btn3dsv").map((_, el) => ({ text: clean($(el).text()), type: $(el).attr("data-type") || "", id: $(el).attr("id") || "" })).get();
-    console.log("[DIAG] SERVER_BUTTONS=" + JSON.stringify(serverButtons));
-    const inline = $("script:not([src])").map((_, el) => $(el).html() || "").get().join("\n");
-    try {
-      const fn = "load" + "Player";
-      const pos = inline.indexOf("function " + fn);
-      const playerChunk = pos >= 0 ? inline.slice(pos, pos + 5000) : inline;
-      const urlMatch = playerChunk.match(/\burl\s*:\s*['"]([^'"]+)['"]/);
-      const actionMatch = playerChunk.match(/\baction\s*:\s*['"]([^'"]+)['"]/);
-      const playerUrl = urlMatch && urlMatch[1];
-      const playerAction = actionMatch && actionMatch[1];
-      console.log("[DIAG] PLAYER_FOUND pos=" + pos + " url=" + JSON.stringify(playerUrl) + " action=" + JSON.stringify(playerAction));
-      if (playerUrl && playerAction) {
-        const postId = serverButtons.length ? ($(".ssl-item.ep-item.active").attr("data-post-id") || "1043") : "1043";
-        const chapter = $(".ssl-item.ep-item.active").attr("data-ep") || "tap-1";
-        const sv = $(".ssl-item.ep-item.active").attr("data-sv") || "1";
-        const type = serverButtons[0].type || "tiktik";
-        const pu = new URL(playerUrl);
-        pu.searchParams.set("action", playerAction);
-        pu.searchParams.set("post_id", postId);
-        pu.searchParams.set("chapter_st", chapter);
-        pu.searchParams.set("type", type);
-        pu.searchParams.set("sv", sv);
-        const pr = await fetchWithTimeout(pu.href, episodeUrl, 8000);
-        const px = cheerio.load(pr.text);
-        console.log("[DIAG] PLAYER status=" + pr.status + " len=" + pr.text.length + " iframe=" + JSON.stringify(px("iframe").map((_,el)=>px(el).attr("src")).get()));
-        console.log("[DIAG] PLAYER snippet=" + pr.text.slice(0,5000));
-        const iframeSrc = px("iframe").first().attr("src");
-        if (iframeSrc) {
-          try {
-            const er = await fetchWithTimeout(iframeSrc, episodeUrl, 10000);
-            const ex = cheerio.load(er.text);
-            const mediaUrls = [...er.text.matchAll(/https?:\\/\\/[^"'<\\s]+\\.(?:m3u8|mp4)(?:\\?[^"'<\\s]*)?/gi)].map(m => m[0]).slice(0,20);
-            const dataAttrs = [...er.text.matchAll(/data-[a-z0-9_-]+=["'][^"']{1,300}["']/gi)].slice(0,30).map(m => m[0]);
-            console.log("[DIAG] IFRAME status=" + er.status + " len=" + er.text.length + " media=" + JSON.stringify(mediaUrls) + " dataAttrs=" + JSON.stringify(dataAttrs));
-            console.log("[DIAG] IFRAME title=" + ex("title").text());
-          } catch(e) {
-            console.log("[DIAG] IFRAME probe error=" + e.message);
-          }
-        }
-      }
-    } catch(e) {
-      console.log("[DIAG] PLAYER probe error=" + e.message);
-    }
-    const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get().map(absoluteUrl).filter(Boolean);
-    console.log("[DIAG] scripts=" + scripts.length);
-    console.log("[DIAG] script_urls=" + JSON.stringify(scripts));
-
-    const inlineHits = [];
-    for (const term of ["ajax", "list_sv", "sv_link", "data-post-id", "m3u8", "player"]) {
-      const p = inline.toLowerCase().indexOf(term);
-      if (p >= 0) inlineHits.push({
-        term,
-        snippet: inline.slice(Math.max(0, p - 300), p + 1200)
-      });
-    }
-    console.log("[DIAG] INLINE_HITS=" + JSON.stringify(inlineHits));
-
-    for (const src of scripts.slice(0, 20)) {
-      try {
-        const sr = await fetchWithTimeout(src, episodeUrl, 8000);
-        if (sr.status < 200 || sr.status >= 400) continue;
-        const text = sr.text;
-        const low = text.toLowerCase();
-        const hits = ["list_sv", "sv_link", "data-post-id", "ajax", "m3u8", "player", "video"].filter(x => low.includes(x));
-        if (!hits.length) continue;
-        const snippets = hits.map(term => {
-          const p = low.indexOf(term);
-          return { term, snippet: text.slice(Math.max(0, p - 350), Math.min(text.length, p + 1500)) };
-        });
-        console.log("[DIAG] SCRIPT_MATCH src=" + src + " status=" + sr.status + " len=" + text.length + " hits=" + hits.join(",") + " data=" + JSON.stringify(snippets));
-      } catch (e) {
-        console.log("[DIAG] SCRIPT_ERR src=" + src + " err=" + e.message);
-      }
-    }
-  } catch (e) {
-    console.log("[DIAG] FAIL " + e.message);
-  }
-}
-
-
-app.get("/debug/player", async (_, res) => {
-  const episodeUrl = BASE_URL + "/tu-tien/muc-than-ky/tap-1.html";
-  try {
-    const result = await fetchWithTimeout(episodeUrl, BASE_URL, 10000);
-    const $ = cheerio.load(result.text);
-    const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get().map(absoluteUrl).filter(Boolean);
-    const inline = $("script:not([src])").map((_, el) => $(el).html() || "").get().join("\n");
-    const terms = ["ajax", "loadplayer", "list_sv", "sv_link", "data-post-id", "data-ep", "m3u8", "player"];
-    const inlineHits = terms.filter(t => inline.toLowerCase().includes(t));
-    const scriptResults = [];
-    for (const src of scripts.slice(0, 30)) {
-      try {
-        const sr = await fetchWithTimeout(src, episodeUrl, 7000);
-        if (sr.status < 200 || sr.status >= 400) continue;
-        const low = sr.text.toLowerCase();
-        const hits = terms.filter(t => low.includes(t));
-        if (hits.length) {
-          scriptResults.push({
-            src,
-            status: sr.status,
-            length: sr.text.length,
-            hits,
-            snippets: hits.slice(0, 5).map(term => {
-              const p = low.indexOf(term);
-              return { term, snippet: sr.text.slice(Math.max(0, p - 250), Math.min(sr.text.length, p + 1200)) };
-            })
-          });
-        }
-      } catch {}
-    }
-    res.json({
-      episode: episodeUrl,
-      pageStatus: result.status,
-      pageLength: result.text.length,
-      scriptCount: scripts.length,
-      scripts,
-      inlineHits,
-      scriptResults
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-async function runDiagOnce() {
-  if (process.env.DIAGNOSE_LIVE !== "1") return;
-  const episodeUrl = BASE_URL + "/tu-tien/muc-than-ky/tap-1.html";
-  try {
-    const r = await fetchWithTimeout(episodeUrl, BASE_URL, 8000);
-    const $ = cheerio.load(r.text);
-    const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get().map(absoluteUrl).filter(Boolean);
-    console.log("[DIAG2] page=" + r.status + " len=" + r.text.length + " scripts=" + scripts.length);
-    console.log("[DIAG2] scriptUrls=" + JSON.stringify(scripts));
-    const inline = $("script:not([src])").map((_, el) => $(el).html() || "").get().join("\n");
-    const inlineTerms = ["ajax","player","m3u8","data-post-id","data-ep","list_sv","loadplayer"];
-    console.log("[DIAG2] inlineHits=" + inlineTerms.filter(t => inline.toLowerCase().includes(t)));
-    for (const src of scripts.slice(0, 15)) {
-      try {
-        const sr=await fetchWithTimeout(src, episodeUrl, 5000);
-        const low=sr.text.toLowerCase();
-        const hits=["dox_ajax_player","player/player.php","list_sv","loadplayer","data-post-id","m3u8","ajax"].filter(t=>low.includes(t));
-        if(hits.length) console.log("[DIAG2] scriptHit=" + src + " status=" + sr.status + " hits=" + hits.join(",") + " len=" + sr.text.length);
-      } catch {}
-    }
-  } catch(e) {
-    console.log("[DIAG2] error=" + e.message);
-  }
-}
-
-runDiagOnce();
-
 app.listen(PORT, "0.0.0.0", () => {
   console.log("YanHH3D Stremio addon listening on port " + PORT);
 });
-
-diagnoseLivePlayer();
