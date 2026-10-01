@@ -417,9 +417,31 @@ async function extractStreams(html, episodeUrl) {
   });
 }
 
-app.get("/manifest.json", (_, res) => {
-  res.set("Cache-Control", "no-store");
-  res.type("application/json").send(JSON.stringify(manifest));
+app.get("/manifest.json", async (_, res) => {
+  try {
+    const m = await vnJson(CTG + "/manifest.json");
+    const sourceResources = Array.isArray(m.resources) ? m.resources : [];
+    const types = Array.isArray(m.types) ? m.types.filter(t => ["movie","series","anime"].includes(t)) : ["movie","series","anime"];
+    const idPrefixes = [...new Set(sourceResources.flatMap(r => Array.isArray(r.idPrefixes) ? r.idPrefixes : []))];
+    res.set("Cache-Control", "no-store");
+    res.json({
+      id: "com.nouistk.catalogvn-streams",
+      version: "1.0.0",
+      name: "Catalog VN + Torrentio + Comet",
+      description: "Catalog VN với nguồn phát Torrentio và Comet.",
+      resources: [
+        { name: "catalog", types, idPrefixes },
+        { name: "meta", types, idPrefixes },
+        { name: "stream", types, idPrefixes }
+      ],
+      types,
+      catalogs: Array.isArray(m.catalogs) ? m.catalogs : [],
+      behaviorHints: { adult: false, configurable: false }
+    });
+  } catch (e) {
+    console.error("[MANIFEST]", e);
+    res.status(502).json({ error: "Catalog VN unavailable" });
+  }
 });
 
 app.get("/catalog/series/yanhh3d.json", async (req, res) => {
