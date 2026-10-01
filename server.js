@@ -17,7 +17,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.4.0",
+  version: "1.5.0",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -512,6 +512,75 @@ app.get("/stream/series/:id.json", async (req, res) => {
   }
 });
 
+
+async function runHHPandaDiagnostic() {
+  if (process.env.HHPANDA_DIAG !== "1") return;
+
+  const url = "https://hhpanda.st/watch-muc-than-ky/tap-1-sv1.html";
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"
+      },
+      redirect: "follow"
+    });
+    const body = await response.text();
+    const $ = cheerio.load(body);
+
+    const iframes = $("iframe").map((_, el) => ({
+      src: $(el).attr("src") || "",
+      dataSrc: $(el).attr("data-src") || "",
+      title: $(el).attr("title") || ""
+    })).get();
+
+    const videos = $("video, source").map((_, el) => ({
+      tag: el.tagName,
+      src: $(el).attr("src") || "",
+      dataSrc: $(el).attr("data-src") || "",
+      type: $(el).attr("type") || ""
+    })).get();
+
+    const mediaAttrs = [];
+    $("[data-src],[data-url],[data-m3u8],[data-file],[data-video]").each((_, el) => {
+      mediaAttrs.push({
+        tag: el.tagName,
+        id: $(el).attr("id") || "",
+        cls: $(el).attr("class") || "",
+        src: $(el).attr("data-src") || "",
+        url: $(el).attr("data-url") || "",
+        m3u8: $(el).attr("data-m3u8") || "",
+        file: $(el).attr("data-file") || "",
+        video: $(el).attr("data-video") || ""
+      });
+    });
+
+    const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get();
+    const forms = $("form").map((_, el) => ({
+      action: $(el).attr("action") || "",
+      method: $(el).attr("method") || ""
+    })).get();
+
+    const textHits = [];
+    for (const term of ["m3u8", "mp4", "iframe", "player", "ajax", "source", "file", "sv1", "watch"]) {
+      if (body.toLowerCase().includes(term)) textHits.push(term);
+    }
+
+    console.log("[HHP-DIAG] status=" + response.status + " type=" + (response.headers.get("content-type") || "") + " len=" + body.length);
+    console.log("[HHP-DIAG] finalUrl=" + response.url);
+    console.log("[HHP-DIAG] title=" + JSON.stringify($("title").text()));
+    console.log("[HHP-DIAG] iframes=" + JSON.stringify(iframes));
+    console.log("[HHP-DIAG] videos=" + JSON.stringify(videos));
+    console.log("[HHP-DIAG] mediaAttrs=" + JSON.stringify(mediaAttrs.slice(0, 50)));
+    console.log("[HHP-DIAG] scripts=" + JSON.stringify(scripts));
+    console.log("[HHP-DIAG] forms=" + JSON.stringify(forms));
+    console.log("[HHP-DIAG] textHits=" + JSON.stringify(textHits));
+  } catch (e) {
+    console.log("[HHP-DIAG] error=" + (e.stack || e.message || String(e)));
+  }
+}
+runHHPandaDiagnostic();
+
 app.get("/", (_, res) => {
   res.type("html").send(
     "<h1>YanHH3D Stremio Add-on</h1><p><a href='/manifest.json'>Install manifest</a></p>"
@@ -519,145 +588,6 @@ app.get("/", (_, res) => {
 });
 
 
-
-
-async function runStreamFreeDiagnostic() {
-  if (process.env.STREAMFREE_DIAG !== "1") return;
-
-  const episodeUrl = BASE_URL + "/tu-tien/muc-than-ky/tap-1.html";
-  try {
-    const frames = await getPlayerFrames(episodeUrl, BASE_URL);
-    console.log("[SF-DIAG] frameCount=" + frames.length);
-
-    for (const item of frames.slice(0, 2)) {
-      const url = item.externalUrl;
-      if (!url) continue;
-
-      try {
-        const response = await fetch(url, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-            "Referer": episodeUrl,
-            "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"
-          },
-          redirect: "follow"
-        });
-
-        const body = await response.text();
-        const $ = cheerio.load(body);
-        const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get();
-        const links = [];
-        for (const re of [
-          /https?:\/\/[^"'<>\\s]+\.m3u8(?:\?[^"'<>\\s]*)?/ig,
-          /https?:\/\/[^"'<>\\s]+\.mp4(?:\?[^"'<>\\s]*)?/ig,
-          /(?:src|file|source|url)\\s*[:=]\\s*["']([^"']+)["']/ig
-        ]) {
-          for (const match of body.matchAll(re)) {
-            const value = match[1] || match[0];
-            if (value) links.push(value);
-          }
-        }
-
-        console.log("[SF-DIAG] url=" + url);
-        console.log("[SF-DIAG] status=" + response.status + " contentType=" + (response.headers.get("content-type") || "") + " len=" + body.length);
-        console.log("[SF-DIAG] title=" + JSON.stringify($("title").text()));
-        for (const term of ["jwplayer", "setup(", "sources", "file:", "playlist", "data-", "token", "nonce"]) {
-          const low3 = body.toLowerCase();
-          const p3 = low3.indexOf(term.toLowerCase());
-          if (p3 >= 0) console.log("[SF-DIAG] htmlContext " + term + "=" + JSON.stringify(body.slice(Math.max(0,p3-300), Math.min(body.length,p3+1200))));
-        }
-        console.log("[SF-DIAG] m3u8Hits=" + JSON.stringify(links.slice(0, 20)));
-
-        console.log("[SF-DIAG] scriptUrls=" + JSON.stringify(scripts.slice(0, 20)));
-
-        for (const script of scripts.slice(0, 10)) {
-          try {
-            const abs = new URL(script, url).href;
-            if (!/app\.e2c7174e\.js$/i.test(abs)) continue;
-            const sr = await fetch(abs, {
-              headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-                "Referer": url,
-                "Accept": "*/*"
-              },
-              redirect: "follow"
-            });
-            const js = await sr.text();
-            const mapCandidates = [
-              abs + ".map",
-              abs.replace(/\\.js$/i, ".js.map")
-            ];
-            for (const mapUrl of [...new Set(mapCandidates)]) {
-              try {
-                const mr = await fetch(mapUrl, { headers: { "User-Agent": "Mozilla/5.0", "Referer": url } });
-                const mt = await mr.text();
-                if (mr.ok && mt.length > 100) {
-                  console.log("[SF-DIAG] sourceMap=" + mapUrl + " len=" + mt.length + " head=" + JSON.stringify(mt.slice(0,2000)));
-                }
-              } catch {}
-            }
-
-            const terms = ["data-nonce", "hrm-player", "fetch(", "XMLHttpRequest", "/api/", ".php", "m3u8", "nonce", "checksum", "data-uip", "video-id", "stream"];
-            const contexts = [];
-            for (const term of terms) {
-              const pos = js.toLowerCase().indexOf(term.toLowerCase());
-              if (pos >= 0) {
-                contexts.push({
-                  term,
-                  context: js.slice(Math.max(0, pos - 400), Math.min(js.length, pos + 1400))
-                });
-              }
-            }
-            console.log("[SF-DIAG] appContexts=" + JSON.stringify(contexts));
-
-            const chunks = js.split(/["']/g);
-            const candidates = chunks
-              .filter(s => /^(https?:\/\/|\/)/i.test(s) || /api|player|video|stream|m3u8|\.php/i.test(s))
-              .filter((s, i, a) => a.indexOf(s) === i)
-              .slice(0, 100);
-            console.log("[SF-DIAG] appStrings=" + JSON.stringify(candidates));
-          } catch (e) {
-            console.log("[SF-DIAG] appScanError=" + (e.message || String(e)));
-          }
-        }
-
-
-        for (const script of scripts.slice(0, 10)) {
-          try {
-            const abs = new URL(script, url).href;
-            const sr = await fetch(abs, {
-              headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-                "Referer": url,
-                "Accept": "*/*"
-              },
-              redirect: "follow"
-            });
-            const text = await sr.text();
-            const low = text.toLowerCase();
-            const hits = ["m3u8", "hls", "master", "manifest", "source", "stream"].filter(x => low.includes(x));
-            if (hits.length) {
-              console.log("[SF-DIAG] script=" + abs + " status=" + sr.status + " len=" + text.length + " hits=" + hits.join(","));
-              for (const term of ["m3u8", "hls", "playlist", "sources", "jwplayer"]) {
-                const low2 = text.toLowerCase();
-                let pos = low2.indexOf(term);
-                if (pos >= 0) {
-                  console.log("[SF-DIAG] context " + term + "=" + JSON.stringify(text.slice(Math.max(0, pos - 500), Math.min(text.length, pos + 1500))));
-                }
-              }
-            }
-          } catch (e) {}
-        }
-      } catch (e) {
-        console.log("[SF-DIAG] iframeError=" + (e.stack || e.message || String(e)));
-      }
-    }
-  } catch (e) {
-    console.log("[SF-DIAG] fatal=" + (e.stack || e.message || String(e)));
-  }
-}
-
-runStreamFreeDiagnostic();
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("YanHH3D Stremio addon listening on port " + PORT);
