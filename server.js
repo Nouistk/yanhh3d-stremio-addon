@@ -16,7 +16,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.0.0",
+  version: "1.1.0",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -222,25 +222,18 @@ async function parseSeries(url, slug) {
     }
   });
 
-  let links = $w("a[href]");
+  let linkEls = $w("a[href]").toArray();
   if (preferredPaneIds.length) {
     const collected = [];
     for (const id of preferredPaneIds) {
-      $w("#" + id + " a[href]").each((_, el) => collected.push(el));
+      collected.push(...$w("#" + id + " a[href]").toArray());
     }
-    if (collected.length) links = cheerio.load("<div></div>")([]); // replaced below
-    if (collected.length) {
-      const seenEls = new Set();
-      links = { each: (fn) => collected.forEach((el, i) => {
-        const key = el;
-        if (!seenEls.has(key)) { seenEls.add(key); fn(i, el); }
-      }) };
-    }
+    if (collected.length) linkEls = collected;
   } else if (container.length) {
-    links = container.find("a[href]");
+    linkEls = container.find("a[href]").toArray();
   }
 
-  links.each((_, el) => {
+  linkEls.forEach((el) => {
     const href = absoluteUrl($(el).attr("href"));
     if (!href || !href.startsWith(BASE_URL)) return;
     const text = clean(
