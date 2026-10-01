@@ -16,7 +16,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.1.0",
+  version: "1.1.1",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -285,50 +285,53 @@ function decodePlayerConfig(value) {
 async function resolveYanSource(sourceUrl, episodeUrl, label) {
   if (!sourceUrl) return null;
 
-  const direct = String(sourceUrl).trim().replace(/&amp;/g, "&").replace(/\\\//g, "/");
-  if (/\.(?:m3u8|mp4)(?:\?|$)/i.test(direct) === false) return null;
+  const direct = String(sourceUrl)
+    .trim()
+    .replace(/&amp;/g, "&")
+    .replace(/\\\//g, "/");
+
+  const isMedia = /\.(?:m3u8|mp4)(?:\?|$)/i.test(direct);
+  if (!isMedia) return null;
 
   try {
-    // YanHH3D's data-src often ends in .m3u8 but returns an HTML player page.
     const body = await getHtmlWithReferer(direct, episodeUrl);
-    if (body.trimStart().startsWith("#EXTM3U")) {
-      return {
-        url: direct,
-        name: label || "Direct",
-        quality: inferQuality(label, direct)
-      };
+    const trimmed = body.replace(/^\\uFEFF/, "").trimStart();
+
+    if (trimmed.startsWith("#EXTM3U")) {
+      return { url: direct, name: label || "Direct", quality: inferQuality(label, direct) };
     }
 
     const $ = cheerio.load(body);
     const obf = $("#player[data-obf]").attr("data-obf") || $("[data-obf]").first().attr("data-obf");
+
     if (obf) {
-      const config = decodePlayerConfig(obf);
-      const match = config.match(/"pU"\s*:\s*"([^"]+)"/i);
-      if (match && match[1]) {
-        const playlist = absoluteUrl(match[1].replace(/\\\//g, "/"));
-        if (playlist) {
-          return {
-            url: playlist,
-            name: label || "Direct",
-            quality: inferQuality(label, playlist)
-          };
+      const candidates = [decodePlayerConfig(obf)];
+      try { candidates.push(Buffer.from(obf, "base64url").toString("utf8")); } catch {}
+
+      for (const config of candidates) {
+        const match = String(config || "").match(/"pU"\s*:\s*"([^"]+)"/i);
+        if (match && match[1]) {
+          const playlist = String(match[1]).replace(/\\\//g, "/").replace(/&amp;/g, "&");
+          if (/^https?:\/\//i.test(playlist)) {
+            return { url: playlist, name: label || "Direct", quality: inferQuality(label, playlist) };
+          }
         }
       }
     }
 
-    const mp4 = body.match(/https?:\/\/[^"'\\s<>]+\.mp4(?:\?[^"'\\s<>]*)?/i);
+    const mp4 = body.match(/https?:\/\/[^"'\s<>]+\.mp4(?:\?[^"'\s<>]*)?/i);
     if (mp4) {
-      return {
-        url: mp4[0],
-        name: label || "Direct",
-        quality: inferQuality(label, mp4[0])
-      };
+      return { url: mp4[0], name: label || "Direct", quality: inferQuality(label, mp4[0]) };
     }
   } catch (e) {
     console.error("resolveYanSource", e);
   }
 
-  return null;
+  return {
+    url: direct,
+    name: (label || "Direct") + " • Direct",
+    quality: inferQuality(label, direct)
+  };
 }
 
 function inferQuality(label, url) {
@@ -368,6 +371,14 @@ async function extractStreams(html, episodeUrl) {
     sources.push({ url, label });
   });
 
+  const rawRe = /data-src\s*=\s*["'](https?:\/\/[^"'<> ]+\.(?:m3u8|mp4)(?:\?[^"'<> ]*)?)["']/gi;
+  for (const match of html.matchAll(rawRe)) {
+    const url = absoluteUrl(match[1].replace(/&amp;/g, "&"));
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    sources.push({ url, label: /4k|2160/i.test(match[1]) ? "4K" : "1080" });
+  }
+
   // Fallbacks when YanHH3D changes the player wrapper.
   if (!sources.length) {
     $("[data-src]").each((_, el) => {
@@ -390,7 +401,6 @@ async function extractStreams(html, episodeUrl) {
       title: source.label,
       url: playback.url,
       behaviorHints: {
-        notWebReady: true,
         proxyHeaders: {
           request: {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
