@@ -522,6 +522,243 @@ app.get("/stream/series/:id.json", async (req, res) => {
   }
 });
 
+
+// ===== Catalog VN + Torrentio + Comet + KKPhim bridge =====
+const CTG_BASE_URL = (process.env.CTG_BASE_URL || "https://ctg.ntl-nuvi.pp.ua").replace(/\/$/, "");
+const TORRENTIO_BASE_URL = (process.env.TORRENTIO_BASE_URL || "https://torrentio.strem.fun").replace(/\/$/, "");
+const COMET_BASE_URL = (process.env.COMET_BASE_URL || "https://comet.elfhosted.com").replace(/\/$/, "");
+const KKPHIM_API_BASE = (process.env.KKPHIM_API_BASE || "https://phimapi.com/v1/api").replace(/\/$/, "");
+const KKPHIM_WEB_BASE = (process.env.KKPHIM_WEB_BASE || "https://www.kkphim.com").replace(/\/$/, "");
+
+async function fetchJson(url, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/154 Safari/537.36",
+        "Accept": "application/json,text/plain,*/*"
+      }
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return await r.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function queryString(req) {
+  const q = new URLSearchParams(req.query || {});
+  const s = q.toString();
+  return s ? "?" + s : "";
+}
+
+function extractImdb(meta) {
+  const m = meta?.meta || meta || {};
+  return m.imdb_id || m.imdbId || m.imdb || m.external_ids?.imdb_id ||
+    m.ids?.imdb || null;
+}
+
+function parseEpisodeFromId(id) {
+  const s = String(id || "");
+  const m = s.match(/(?:^|:)(\\d+)(?::(\\d+))?$/);
+  if (!m) return { season: null, episode: null };
+  if (m[2]) return { season: Number(m[1]), episode: Number(m[2]) };
+  return { season: 1, episode: Number(m[1]) };
+}
+
+async function resolveCombinedMeta(type, id) {
+  const url = CTG_BASE_URL + "/meta/" + encodeURIComponent(type) + "/" +
+    encodeURIComponent(id) + ".json";
+  try {
+    return await fetchJson(url);
+  } catch {
+    return null;
+  }
+}
+
+async function resolveImdb(type, id) {
+  if (/^tt\\d+/.test(String(id))) return String(id).split(":")[0];
+
+  const data = await resolveCombinedMeta(type, id);
+  const direct = extractImdb(data);
+  if (direct && /^tt\\d+$/.test(String(direct))) return String(direct);
+
+  const m = data?.meta || data || {};
+  if (Array.isArray(m.videos)) {
+    const hit = m.videos.find(v => String(v.id) === String(id));
+    const vi = extractImdb(hit);
+    if (vi) return vi;
+  }
+  return null;
+}
+
+async function getAddonStreams(base, type, id) {
+  try {
+    const url = base + "/stream/" + encodeURIComponent(type) + "/" +
+      encodeURIComponent(id) + ".json";
+    const data = await fetchJson(url, 14000);
+    return Array.isArray(data?.streams) ? data.streams : [];
+  } catch (e) {
+    console.log("[COMBINED] source failed:", base, e.message);
+    return [];
+  }
+}
+
+async function findKkphimSlugByImdb(imdb, title) {
+  const terms = [imdb, title].filter(Boolean);
+  for (const term of terms) {
+    try {
+      const u = KKPHIM_WEB_BASE + "/tim-kiem?keyword=" + encodeURIComponent(term);
+      const r = await fetch(u, {
+        headers: { "User-Agent": "Mozilla/5.0", "Accept": "text/html,*/*" }
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      const $ = cheerio.load(html);
+      let slug = null;
+      $("a[href*='/phim/']").each((_, el) => {
+        if (slug) return;
+        const href = $(el).attr("href") || "";
+        if (/\\/phim\\/[^/?#]+/i.test(href)) {
+          slug = href.match(/\\/phim\\/([^/?#]+)/i)?.[1] || null;
+        }
+      });
+      if (slug) return slug;
+    } catch {}
+  }
+  return null;
+}
+
+async function getKkphimStreams(type, id, imdb, meta) {
+  try {
+    let slug = null;
+    if (String(id).startsWith("kkp:")) slug = String(id).slice(4).split(":")[0];
+    if (!slug) slug = await findKkphimSlugByImdb(imdb, meta?.meta?.name || meta?.name);
+
+    if (!slug) return [];
+
+    const data = await fetchJson(KKPHIM_API_BASE + "/phim/" + encodeURIComponent(slug), 14000);
+    const item = data?.data?.item;
+    const episodes = data?.data?.episodes || [];
+    if (!item || !episodes.length) return [];
+
+    const ep = parseEpisodeFromId(id);
+    const out = [];
+    for (const server of episodes) {
+      const rows = Array.isArray(server.server_data) ? server.server_data : [];
+      for (const row of rows) {
+        const n = String(row.name || "");
+        const em = n.match(/(?:tập|episode|ep)\\s*0*(\\d+)/i);
+        const rowEp = em ? Number(em[1]) : null;
+        if (ep.episode && rowEp && rowEp !== ep.episode) continue;
+        const url = row.link_m3u8 || row.link_embed;
+        if (!url) continue;
+        out.push({
+          name: "KKPhim • " + n,
+          title: server.server_name || "Vietsub",
+          url,
+          behaviorHints: { notWebReady: true }
+        });
+        if (ep.episode) break;
+      }
+      if (out.length && ep.episode) break;
+    }
+    return out;
+  } catch (e) {
+    console.log("[COMBINED] KKPhim failed:", e.message);
+    return [];
+  }
+}
+
+async function combinedManifest() {
+  let base;
+  try {
+    base = await fetchJson(CTG_BASE_URL + "/manifest.json");
+  } catch {
+    base = {
+      id: "ntl.catalog",
+      version: "1.3.2",
+      name: "Catalog VN",
+      description: "Kho phim Châu Á, Anime, Hoạt hình, Phim Việt Nam & Bộ sưu tập.",
+      resources: ["catalog", "meta"],
+      types: ["movie", "series", "anime", "collections"],
+      idPrefixes: ["kkp:","tmdb:","tt","ntl:"],
+      catalogs: []
+    };
+  }
+
+  const prefixes = Array.isArray(base.idPrefixes) ? base.idPrefixes : [];
+  const types = ["movie", "series", "anime"].filter(t => (base.types || []).includes(t));
+  base.id = "ntl.catalog.combined";
+  base.version = "1.0.0";
+  base.name = "Catalog VN • Streams";
+  base.description = "Catalog VN với nguồn phát gộp từ Catalog VN, Torrentio, Comet và KKPhim.";
+  base.resources = [
+    ...(Array.isArray(base.resources) ? base.resources : ["catalog", "meta"]),
+    { name: "stream", types, idPrefixes: prefixes }
+  ];
+  base.behaviorHints = { ...(base.behaviorHints || {}), configurable: false };
+  return base;
+}
+
+app.use("/vn", async (req, res, next) => {
+  try {
+    const path = req.path;
+
+    if (path === "/manifest.json") {
+      const m = await combinedManifest();
+      res.set("Cache-Control", "public, max-age=60");
+      return res.json(m);
+    }
+
+    const match = path.match(/^\\/(catalog|meta|stream)\\/([^/]+)\\/(.+?)(?:\\.json)?$/);
+    if (!match) return next();
+
+    const resource = match[1];
+    const type = decodeURIComponent(match[2]);
+    const id = decodeURIComponent(match[3].replace(/\\.json$/, ""));
+
+    if (resource !== "stream") {
+      const upstream = CTG_BASE_URL + "/" + resource + "/" +
+        encodeURIComponent(type) + "/" + id + ".json" + queryString(req);
+      const data = await fetchJson(upstream, 15000);
+      res.set("Cache-Control", "public, max-age=60");
+      return res.json(data);
+    }
+
+    const imdb = await resolveImdb(type, id);
+    let lookupId = imdb || id;
+
+    const tasks = [];
+    if (imdb) {
+      tasks.push(getAddonStreams(TORRENTIO_BASE_URL, type, lookupId));
+      tasks.push(getAddonStreams(COMET_BASE_URL, type, lookupId));
+    }
+
+    const meta = await resolveCombinedMeta(type, id);
+    tasks.push(getKkphimStreams(type, id, imdb, meta));
+
+    const groups = await Promise.all(tasks);
+    const streams = groups.flat();
+
+    const seen = new Set();
+    const unique = streams.filter(s => {
+      const key = String(s.url || s.infoHash || s.externalUrl || s.name || "");
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    res.set("Cache-Control", "public, max-age=30");
+    return res.json({ streams: unique });
+  } catch (e) {
+    console.error("[COMBINED] error", e);
+    return res.status(502).json({ streams: [] });
+  }
+});
+
 app.get("/", (_, res) => {
   res.type("html").send(
     "<h1>YanHH3D Stremio Add-on</h1><p><a href='/manifest.json'>Install manifest</a></p>"
