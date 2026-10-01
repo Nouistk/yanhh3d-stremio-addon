@@ -473,11 +473,6 @@ app.get("/", (_, res) => {
 });
 
 
-if (process.env.YANHH3D_SELF_TEST === "1") {
-  getPlayerFrames(BASE_URL + "/tu-tien/muc-than-ky/tap-1.html", BASE_URL)
-    .then((streams) => console.log("[SELFTEST] streams=" + JSON.stringify(streams)))
-    .catch((e) => console.error("[SELFTEST] error=" + (e.stack || e.message || String(e))));
-}
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("YanHH3D Stremio addon listening on port " + PORT);
