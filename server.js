@@ -16,7 +16,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.1.2",
+  version: "1.1.3",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -464,6 +464,10 @@ app.get("/stream/series/:id.json", async (req, res) => {
     console.log("[STREAM] episode html length=" + html.length);
     console.log("[STREAM] has list-severs=" + /list-severs/i.test(html));
     console.log("[STREAM] data-src count=" + (html.match(/data-src\\s*=/gi) || []).length);
+    const marker = html.toLowerCase().indexOf("list-severs");
+    if (marker >= 0) {
+      console.log("[STREAM] list-severs snippet=" + html.slice(Math.max(0, marker - 1200), marker + 7000));
+    }
 
     const streams = await extractStreams(html, episodeUrl);
     console.log("[STREAM] resolved streams=" + streams.length);
