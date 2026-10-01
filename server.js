@@ -16,7 +16,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.1.5",
+  version: "1.1.6",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -501,49 +501,68 @@ app.get("/", (_, res) => {
 });
 
 
+async function fetchWithTimeout(url, referer, ms = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        "Referer": referer,
+        "Accept": "*/*"
+      },
+      signal: controller.signal,
+      redirect: "follow"
+    });
+    return { status: r.status, text: await r.text() };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function diagnoseLivePlayer() {
   const episodeUrl = BASE_URL + "/tu-tien/muc-than-ky/tap-1.html";
+  console.log("[DIAG] START " + episodeUrl);
   try {
-    const html = await getHtmlWithReferer(episodeUrl, BASE_URL);
+    const result = await fetchWithTimeout(episodeUrl, BASE_URL, 10000);
+    const html = result.text;
+    console.log("[DIAG] PAGE status=" + result.status + " html=" + html.length);
+
     const $ = cheerio.load(html);
     const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get().map(absoluteUrl).filter(Boolean);
-    const inlineScripts = $("script:not([src])").map((_, el) => $(el).html() || "").get();
-
-    console.log("[DIAG] episode status html=" + html.length);
-    console.log("[DIAG] list_sv elements=" + $("#list_sv").length + " children=" + $("#list_sv").find("*").length);
-    console.log("[DIAG] data-post-id=" + (html.match(/data-post-id/gi) || []).length);
-    console.log("[DIAG] data-ep=" + (html.match(/data-ep/gi) || []).length);
     console.log("[DIAG] scripts=" + scripts.length);
+    console.log("[DIAG] script_urls=" + JSON.stringify(scripts));
 
-    for (const src of scripts) {
+    const inline = $("script:not([src])").map((_, el) => $(el).html() || "").get().join("\n");
+    const inlineHits = [];
+    for (const term of ["ajax", "list_sv", "sv_link", "data-post-id", "m3u8", "player"]) {
+      const p = inline.toLowerCase().indexOf(term);
+      if (p >= 0) inlineHits.push({
+        term,
+        snippet: inline.slice(Math.max(0, p - 300), p + 1200)
+      });
+    }
+    console.log("[DIAG] INLINE_HITS=" + JSON.stringify(inlineHits));
+
+    for (const src of scripts.slice(0, 20)) {
       try {
-        const text = await getHtmlWithReferer(src, episodeUrl);
+        const sr = await fetchWithTimeout(src, episodeUrl, 8000);
+        if (sr.status < 200 || sr.status >= 400) continue;
+        const text = sr.text;
         const low = text.toLowerCase();
         const hits = ["list_sv", "sv_link", "data-post-id", "ajax", "m3u8", "player", "video"].filter(x => low.includes(x));
         if (!hits.length) continue;
-
-        console.log("[DIAG] SCRIPT " + src + " hits=" + hits.join(",") + " len=" + text.length);
-
-        for (const term of hits.slice(0, 4)) {
-          const pos = low.indexOf(term);
-          if (pos >= 0) {
-            console.log("[DIAG] " + src + " :: " + term + " :: " +
-              text.slice(Math.max(0, pos - 400), Math.min(text.length, pos + 1400)));
-          }
-        }
+        const snippets = hits.map(term => {
+          const p = low.indexOf(term);
+          return { term, snippet: text.slice(Math.max(0, p - 350), Math.min(text.length, p + 1500)) };
+        });
+        console.log("[DIAG] SCRIPT_MATCH src=" + src + " status=" + sr.status + " len=" + text.length + " hits=" + hits.join(",") + " data=" + JSON.stringify(snippets));
       } catch (e) {
-        console.log("[DIAG] script fetch failed " + src + " :: " + e.message);
-      }
-    }
-
-    for (const text of inlineScripts) {
-      const low = text.toLowerCase();
-      if (/(list_sv|sv_link|data-post-id|ajax|m3u8)/.test(low)) {
-        console.log("[DIAG] INLINE :: " + text.slice(0, 4000));
+        console.log("[DIAG] SCRIPT_ERR src=" + src + " err=" + e.message);
       }
     }
   } catch (e) {
-    console.log("[DIAG] failed :: " + e.message);
+    console.log("[DIAG] FAIL " + e.message);
   }
 }
 
