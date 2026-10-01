@@ -16,7 +16,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.1.3",
+  version: "1.1.4",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -464,9 +464,20 @@ app.get("/stream/series/:id.json", async (req, res) => {
     console.log("[STREAM] episode html length=" + html.length);
     console.log("[STREAM] has list-severs=" + /list-severs/i.test(html));
     console.log("[STREAM] data-src count=" + (html.match(/data-src\\s*=/gi) || []).length);
-    const marker = html.toLowerCase().indexOf("list-severs");
-    if (marker >= 0) {
-      console.log("[STREAM] list-severs snippet=" + html.slice(Math.max(0, marker - 1200), marker + 7000));
+    const classMatches = [...html.matchAll(/class=["'][^"']*list-severs[^"']*["']/gi)];
+    const signalPatterns = [
+      /sv_LINK\\d+/gi,
+      /data-obf/gi,
+      /\\.m3u8/gi,
+      /fbcdn/gi,
+      /player/gi,
+      /data-src/gi
+    ];
+    console.log("[STREAM] real list-severs class count=" + classMatches.length);
+    console.log("[STREAM] signal counts=" + signalPatterns.map(re => (html.match(re) || []).length).join(","));
+    if (classMatches.length) {
+      const marker = classMatches[0].index;
+      console.log("[STREAM] REAL SERVER SNIPPET=" + html.slice(Math.max(0, marker - 500), marker + 12000));
     }
 
     const streams = await extractStreams(html, episodeUrl);
