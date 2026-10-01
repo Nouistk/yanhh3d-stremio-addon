@@ -17,7 +17,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.2.0",
+  version: "1.3.0",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -417,9 +417,49 @@ async function extractStreams(html, episodeUrl) {
   });
 }
 
+function decodeWidgetUrl(encoded) {
+  try {
+    return Buffer.from(String(encoded || ""), "base64url").toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+function isAllowedWidgetUrl(value) {
+  try {
+    const u = new URL(value);
+    return u.protocol === "https:" &&
+      u.hostname === "streamfree.vip" &&
+      u.pathname.startsWith("/embed/");
+  } catch {
+    return false;
+  }
+}
+
 app.get("/manifest.json", (_, res) => {
   res.set("Cache-Control", "no-store");
   res.type("application/json").send(JSON.stringify(manifest));
+});
+
+app.get("/widget/:encoded.html", (req, res) => {
+  const frameUrl = decodeWidgetUrl(req.params.encoded);
+  if (!isAllowedWidgetUrl(frameUrl)) {
+    return res.status(400).type("text/plain").send("Invalid widget URL");
+  }
+
+  const src = JSON.stringify(frameUrl).replace(/</g, "\\u003c");
+  res.set("Cache-Control", "public, max-age=60");
+  res.type("html").send(
+    "<!doctype html>" +
+    "<html><head><meta charset='utf-8'>" +
+    "<meta name='viewport' content='width=device-width,initial-scale=1,viewport-fit=cover'>" +
+    "<style>html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}iframe{width:100%;height:100%;border:0;display:block}</style>" +
+    "</head><body>" +
+    "<iframe src=" + src +
+    " allow='autoplay; fullscreen; picture-in-picture; encrypted-media' allowfullscreen " +
+    "referrerpolicy='strict-origin-when-cross-origin'></iframe>" +
+    "</body></html>"
+  );
 });
 
 app.get("/catalog/series/yanhh3d.json", async (req, res) => {
