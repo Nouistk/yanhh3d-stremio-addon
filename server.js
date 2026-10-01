@@ -520,6 +520,80 @@ app.get("/", (_, res) => {
 
 
 
+
+async function runStreamFreeDiagnostic() {
+  if (process.env.STREAMFREE_DIAG !== "1") return;
+
+  const episodeUrl = BASE_URL + "/tu-tien/muc-than-ky/tap-1.html";
+  try {
+    const frames = await getPlayerFrames(episodeUrl, BASE_URL);
+    console.log("[SF-DIAG] frameCount=" + frames.length);
+
+    for (const item of frames.slice(0, 2)) {
+      const url = item.externalUrl;
+      if (!url) continue;
+
+      try {
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+            "Referer": episodeUrl,
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"
+          },
+          redirect: "follow"
+        });
+
+        const body = await response.text();
+        const $ = cheerio.load(body);
+        const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get();
+        const links = [];
+        for (const re of [
+          /https?:\/\/[^"'<>\\s]+\.m3u8(?:\?[^"'<>\\s]*)?/ig,
+          /https?:\/\/[^"'<>\\s]+\.mp4(?:\?[^"'<>\\s]*)?/ig,
+          /(?:src|file|source|url)\\s*[:=]\\s*["']([^"']+)["']/ig
+        ]) {
+          for (const match of body.matchAll(re)) {
+            const value = match[1] || match[0];
+            if (value) links.push(value);
+          }
+        }
+
+        console.log("[SF-DIAG] url=" + url);
+        console.log("[SF-DIAG] status=" + response.status + " contentType=" + (response.headers.get("content-type") || "") + " len=" + body.length);
+        console.log("[SF-DIAG] title=" + JSON.stringify($("title").text()));
+        console.log("[SF-DIAG] m3u8Hits=" + JSON.stringify(links.slice(0, 20)));
+        console.log("[SF-DIAG] scriptUrls=" + JSON.stringify(scripts.slice(0, 20)));
+
+        for (const script of scripts.slice(0, 10)) {
+          try {
+            const abs = new URL(script, url).href;
+            const sr = await fetch(abs, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+                "Referer": url,
+                "Accept": "*/*"
+              },
+              redirect: "follow"
+            });
+            const text = await sr.text();
+            const low = text.toLowerCase();
+            const hits = ["m3u8", "hls", "master", "manifest", "source", "stream"].filter(x => low.includes(x));
+            if (hits.length) {
+              console.log("[SF-DIAG] script=" + abs + " status=" + sr.status + " len=" + text.length + " hits=" + hits.join(","));
+            }
+          } catch (e) {}
+        }
+      } catch (e) {
+        console.log("[SF-DIAG] iframeError=" + (e.stack || e.message || String(e)));
+      }
+    }
+  } catch (e) {
+    console.log("[SF-DIAG] fatal=" + (e.stack || e.message || String(e)));
+  }
+}
+
+runStreamFreeDiagnostic();
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log("YanHH3D Stremio addon listening on port " + PORT);
 });
