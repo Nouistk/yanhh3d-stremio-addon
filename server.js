@@ -540,6 +540,7 @@ async function diagnoseLivePlayer() {
       const actionMatch = playerChunk.match(/\\baction\\s*:\\s*['"]([^'"]+)['"]/);
       const playerUrl = urlMatch && urlMatch[1];
       const playerAction = actionMatch && actionMatch[1];
+      console.log("[DIAG] PLAYER_FOUND pos=" + pos + " url=" + JSON.stringify(playerUrl) + " action=" + JSON.stringify(playerAction));
       if (playerUrl && playerAction) {
         const postId = serverButtons.length ? ($(".ssl-item.ep-item.active").attr("data-post-id") || "1043") : "1043";
         const chapter = $(".ssl-item.ep-item.active").attr("data-ep") || "tap-1";
