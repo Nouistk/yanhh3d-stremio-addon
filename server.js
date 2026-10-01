@@ -572,6 +572,17 @@ async function runHHPandaDiagnostic() {
     console.log("[HHP-DIAG] iframes=" + JSON.stringify(iframes));
     console.log("[HHP-DIAG] videos=" + JSON.stringify(videos));
     console.log("[HHP-DIAG] mediaAttrs=" + JSON.stringify(mediaAttrs.slice(0, 50)));
+
+    const frameNodes = $("iframe").map((_, el) => $.html(el.parent || el)).get();
+    console.log("[HHP-DIAG] iframeParents=" + JSON.stringify(frameNodes.slice(0, 10)));
+
+    for (const term of ["iframe", "player", "sv1", "admin-ajax.php", "wpd", "watch-muc-than-ky"]) {
+      const low = body.toLowerCase();
+      const pos = low.indexOf(term.toLowerCase());
+      if (pos >= 0) {
+        console.log("[HHP-DIAG] context " + term + "=" + JSON.stringify(body.slice(Math.max(0, pos - 1200), Math.min(body.length, pos + 3000))));
+      }
+    }
     console.log("[HHP-DIAG] scripts=" + JSON.stringify(scripts));
     console.log("[HHP-DIAG] forms=" + JSON.stringify(forms));
     console.log("[HHP-DIAG] textHits=" + JSON.stringify(textHits));
