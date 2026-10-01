@@ -230,7 +230,6 @@ function extractStreams(html) {
 
   const scripts = $("script").map((_, el) => $(el).html() || "").get().join("\n");
   const patterns = [
-    /https?:\\/\\/[^"'\\s]+\.(?:m3u8|mp4)(?:\?[^"'\\s]+)?/gi,
     /https?:\/\/[^"'\\s]+\.(?:m3u8|mp4)(?:\?[^"'\\s]+)?/gi
   ];
 
