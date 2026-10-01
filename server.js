@@ -16,7 +16,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.1.7",
+  version: "1.1.8",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -610,6 +610,33 @@ app.get("/debug/player", async (_, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+async function runDiagOnce() {
+  if (process.env.DIAGNOSE_LIVE !== "1") return;
+  const episodeUrl = BASE_URL + "/tu-tien/muc-than-ky/tap-1.html";
+  try {
+    const r = await fetchWithTimeout(episodeUrl, BASE_URL, 8000);
+    const $ = cheerio.load(r.text);
+    const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get().map(absoluteUrl).filter(Boolean);
+    console.log("[DIAG2] page=" + r.status + " len=" + r.text.length + " scripts=" + scripts.length);
+    console.log("[DIAG2] scriptUrls=" + JSON.stringify(scripts));
+    const inline = $("script:not([src])").map((_, el) => $(el).html() || "").get().join("\n");
+    const inlineTerms = ["ajax","player","m3u8","data-post-id","data-ep","list_sv","loadplayer"];
+    console.log("[DIAG2] inlineHits=" + inlineTerms.filter(t => inline.toLowerCase().includes(t)));
+    for (const src of scripts.slice(0, 15)) {
+      try {
+        const sr=await fetchWithTimeout(src, episodeUrl, 5000);
+        const low=sr.text.toLowerCase();
+        const hits=["dox_ajax_player","player/player.php","list_sv","loadplayer","data-post-id","m3u8","ajax"].filter(t=>low.includes(t));
+        if(hits.length) console.log("[DIAG2] scriptHit=" + src + " status=" + sr.status + " hits=" + hits.join(",") + " len=" + sr.text.length);
+      } catch {}
+    }
+  } catch(e) {
+    console.log("[DIAG2] error=" + e.message);
+  }
+}
+
+runDiagOnce();
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("YanHH3D Stremio addon listening on port " + PORT);
