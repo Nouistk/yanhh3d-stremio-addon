@@ -16,7 +16,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.1.6",
+  version: "1.1.7",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -566,8 +566,51 @@ async function diagnoseLivePlayer() {
   }
 }
 
+
+app.get("/debug/player", async (_, res) => {
+  const episodeUrl = BASE_URL + "/tu-tien/muc-than-ky/tap-1.html";
+  try {
+    const result = await fetchWithTimeout(episodeUrl, BASE_URL, 10000);
+    const $ = cheerio.load(result.text);
+    const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get().map(absoluteUrl).filter(Boolean);
+    const inline = $("script:not([src])").map((_, el) => $(el).html() || "").get().join("\n");
+    const terms = ["ajax", "loadplayer", "list_sv", "sv_link", "data-post-id", "data-ep", "m3u8", "player"];
+    const inlineHits = terms.filter(t => inline.toLowerCase().includes(t));
+    const scriptResults = [];
+    for (const src of scripts.slice(0, 30)) {
+      try {
+        const sr = await fetchWithTimeout(src, episodeUrl, 7000);
+        if (sr.status < 200 || sr.status >= 400) continue;
+        const low = sr.text.toLowerCase();
+        const hits = terms.filter(t => low.includes(t));
+        if (hits.length) {
+          scriptResults.push({
+            src,
+            status: sr.status,
+            length: sr.text.length,
+            hits,
+            snippets: hits.slice(0, 5).map(term => {
+              const p = low.indexOf(term);
+              return { term, snippet: sr.text.slice(Math.max(0, p - 250), Math.min(sr.text.length, p + 1200)) };
+            })
+          });
+        }
+      } catch {}
+    }
+    res.json({
+      episode: episodeUrl,
+      pageStatus: result.status,
+      pageLength: result.text.length,
+      scriptCount: scripts.length,
+      scripts,
+      inlineHits,
+      scriptResults
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log("YanHH3D Stremio addon listening on port " + PORT);
 });
-
-diagnoseLivePlayer();
