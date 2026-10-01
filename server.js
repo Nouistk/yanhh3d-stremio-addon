@@ -495,24 +495,34 @@ async function vnStreams(base, type, id) {
   } catch { return []; }
 }
 
-app.get("/vn/manifest.json", async (_, res) => {
+app.get("/manifest.json", async (_, res) => {
   try {
     const m = await vnJson(CTG + "/manifest.json");
-    m.id = "com.nouistk.catalogvn-streams";
-    m.name = "Catalog VN • Torrentio + Comet";
-    m.description = "Catalog VN với nguồn phát Torrentio và Comet.";
-    const types = (m.types || []).filter(t => ["movie","series","anime"].includes(t));
-    m.resources = [
-      ...(m.resources || []),
-      { name: "stream", types, idPrefixes: m.idPrefixes || [] }
-    ];
-    res.json(m);
+    const sourceResources = Array.isArray(m.resources) ? m.resources : [];
+    const types = Array.isArray(m.types) ? m.types.filter(t => ["movie","series","anime"].includes(t)) : ["movie","series","anime"];
+    const idPrefixes = [...new Set(sourceResources.flatMap(r => Array.isArray(r.idPrefixes) ? r.idPrefixes : []))];
+
+    res.json({
+      id: "com.nouistk.catalogvn-streams",
+      version: "1.0.0",
+      name: "Catalog VN + Torrentio + Comet",
+      description: "Catalog VN với nguồn phát Torrentio và Comet.",
+      resources: [
+        { name: "catalog", types, idPrefixes },
+        { name: "meta", types, idPrefixes },
+        { name: "stream", types, idPrefixes }
+      ],
+      types,
+      catalogs: Array.isArray(m.catalogs) ? m.catalogs : [],
+      behaviorHints: { adult: false, configurable: false }
+    });
   } catch (e) {
+    console.error("[MANIFEST]", e);
     res.status(502).json({ error: "Catalog VN unavailable" });
   }
 });
 
-app.use("/vn", async (req, res, next) => {
+async function proxyVN(req, res, next) {
   try {
     const p = req.path.split("/").filter(Boolean);
     if (p.length < 3) return next();
@@ -542,9 +552,7 @@ app.use("/vn", async (req, res, next) => {
     if (type === "series") {
       const parts = String(id).split(":");
       const nums = parts.filter(x => /^\d+$/.test(x)).map(Number);
-      if (nums.length >= 2) {
-        providerId = imdb + ":" + nums[nums.length - 2] + ":" + nums[nums.length - 1];
-      }
+      if (nums.length >= 2) providerId = imdb + ":" + nums[nums.length - 2] + ":" + nums[nums.length - 1];
     }
 
     const [torrentio, comet] = await Promise.all([
@@ -566,7 +574,11 @@ app.use("/vn", async (req, res, next) => {
     console.error("[VN PROXY]", e);
     return res.status(502).json({ error: "Upstream request failed", streams: [] });
   }
-});
+}
+
+app.use(proxyVN);
+
+
 
 app.get("/", (_, res) => {
   res.type("html").send(
