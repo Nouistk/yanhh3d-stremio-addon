@@ -529,6 +529,8 @@ async function diagnoseLivePlayer() {
     console.log("[DIAG] PAGE status=" + result.status + " html=" + html.length);
 
     const $ = cheerio.load(html);
+    const serverButtons = $("#list_sv .btn3dsv").map((_, el) => ({ text: clean($(el).text()), type: $(el).attr("data-type") || "", id: $(el).attr("id") || "" })).get();
+    console.log("[DIAG] SERVER_BUTTONS=" + JSON.stringify(serverButtons));
     const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get().map(absoluteUrl).filter(Boolean);
     console.log("[DIAG] scripts=" + scripts.length);
     console.log("[DIAG] script_urls=" + JSON.stringify(scripts));
