@@ -531,6 +531,33 @@ async function diagnoseLivePlayer() {
     const $ = cheerio.load(html);
     const serverButtons = $("#list_sv .btn3dsv").map((_, el) => ({ text: clean($(el).text()), type: $(el).attr("data-type") || "", id: $(el).attr("id") || "" })).get();
     console.log("[DIAG] SERVER_BUTTONS=" + JSON.stringify(serverButtons));
+    try {
+      const fn = "load" + "Player";
+      const pos = inline.indexOf("function " + fn);
+      const playerChunk = pos >= 0 ? inline.slice(pos, pos + 5000) : inline;
+      const urlMatch = playerChunk.match(/\\burl\\s*:\\s*['"]([^'"]+)['"]/);
+      const actionMatch = playerChunk.match(/\\baction\\s*:\\s*['"]([^'"]+)['"]/);
+      const playerUrl = urlMatch && urlMatch[1];
+      const playerAction = actionMatch && actionMatch[1];
+      if (playerUrl && playerAction) {
+        const postId = serverButtons.length ? ($(".ssl-item.ep-item.active").attr("data-post-id") || "1043") : "1043";
+        const chapter = $(".ssl-item.ep-item.active").attr("data-ep") || "tap-1";
+        const sv = $(".ssl-item.ep-item.active").attr("data-sv") || "1";
+        const type = serverButtons[0].type || "tiktik";
+        const pu = new URL(playerUrl);
+        pu.searchParams.set("action", playerAction);
+        pu.searchParams.set("post_id", postId);
+        pu.searchParams.set("chapter_st", chapter);
+        pu.searchParams.set("type", type);
+        pu.searchParams.set("sv", sv);
+        const pr = await fetchWithTimeout(pu.href, episodeUrl, 8000);
+        const px = cheerio.load(pr.text);
+        console.log("[DIAG] PLAYER status=" + pr.status + " len=" + pr.text.length + " iframe=" + JSON.stringify(px("iframe").map((_,el)=>px(el).attr("src")).get()));
+        console.log("[DIAG] PLAYER snippet=" + pr.text.slice(0,5000));
+      }
+    } catch(e) {
+      console.log("[DIAG] PLAYER probe error=" + e.message);
+    }
     const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get().map(absoluteUrl).filter(Boolean);
     console.log("[DIAG] scripts=" + scripts.length);
     console.log("[DIAG] script_urls=" + JSON.stringify(scripts));
