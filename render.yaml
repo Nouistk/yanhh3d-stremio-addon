@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: yanhh3d-stremio-addon
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: YANHH3D_BASE_URL
+        value: https://yanhh3d.ee
+      - key: CACHE_MS
+        value: "300000"
