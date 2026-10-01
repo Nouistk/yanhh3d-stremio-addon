@@ -17,14 +17,12 @@ const manifest = {
     { name: "stream", types: ["series"], idPrefixes: ["yanhh:"] }
   ],
   types: ["series"],
-  catalogs: [
-    {
-      type: "series",
-      id: "yanhh3d",
-      name: "YanHH3D",
-      extra: [{ name: "search", isRequired: false }]
-    }
-  ],
+  catalogs: [{
+    type: "series",
+    id: "yanhh3d",
+    name: "YanHH3D",
+    extra: [{ name: "search", isRequired: false }]
+  }],
   behaviorHints: { adult: false, configurable: false }
 };
 
@@ -39,12 +37,19 @@ function clean(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
 }
 
+// Encode source paths so Stremio route parameters never contain raw slashes.
 function idFor(slug) {
-  return "yanhh:" + slug.replace(/^https?:\/\/[^/]+\//, "").replace(/^\//, "").replace(/\/$/, "");
+  const path = String(slug)
+    .replace(/^https?:\/\/[^/]+\//, "")
+    .replace(/^\//, "")
+    .replace(/\/$/, "");
+  return "yanhh:" + Buffer.from(path, "utf8").toString("base64url");
 }
 
 function slugFromId(id) {
-  return String(id || "").replace(/^yanhh:/, "").replace(/\/$/, "");
+  const encoded = String(id || "").replace(/^yanhh:/, "");
+  try { return Buffer.from(encoded, "base64url").toString("utf8"); }
+  catch { return ""; }
 }
 
 async function getHtml(url) {
@@ -60,6 +65,7 @@ async function getHtml(url) {
     redirect: "follow"
   });
   if (!response.ok) throw new Error("YanHH3D HTTP " + response.status);
+
   const html = await response.text();
   cache.set(key, { time: Date.now(), value: html });
   return html;
@@ -77,7 +83,11 @@ function parseCards(html) {
     const path = new URL(href).pathname;
     if (!path || /tập-|tap-|episode|\/page\//i.test(path)) return;
 
-    const title = clean($(el).find("h2,h3,h4,.title,.name").first().text() || $(el).attr("title") || $(el).text());
+    const title = clean(
+      $(el).find("h2,h3,h4,.title,.name").first().text() ||
+      $(el).attr("title") ||
+      $(el).text()
+    );
     const img = $(el).find("img").first();
     const poster = img.attr("data-src") || img.attr("data-lazy-src") || img.attr("src");
 
@@ -87,14 +97,18 @@ function parseCards(html) {
     const id = idFor(path);
     if (seen.has(id)) return;
     seen.add(id);
-    items.push({ id, type: "series", name: title, poster: absoluteUrl(poster) });
+    items.push({
+      id,
+      type: "series",
+      name: title,
+      ...(absoluteUrl(poster) ? { poster: absoluteUrl(poster) } : {})
+    });
   });
 
   return items.slice(0, 100);
 }
 
 async function catalog(search) {
-  let url = BASE_URL + "/";
   if (search) {
     const q = encodeURIComponent(search);
     const candidates = [
@@ -102,23 +116,31 @@ async function catalog(search) {
       BASE_URL + "/tim-kiem/?s=" + q,
       BASE_URL + "/?search=" + q
     ];
+
     for (const candidate of candidates) {
       try {
-        const html = await getHtml(candidate);
-        const results = parseCards(html);
+        const results = parseCards(await getHtml(candidate));
         if (results.length) return results;
       } catch {}
     }
   }
-  return parseCards(await getHtml(url));
+
+  return parseCards(await getHtml(BASE_URL + "/"));
 }
 
 async function parseSeries(url, slug) {
   const html = await getHtml(url);
   const $ = cheerio.load(html);
 
-  const title = clean($("h1").first().text()) || clean($("title").text()).replace(/\s*[-|].*$/, "");
-  const description = clean($("meta[name='description']").attr("content") || $(".description,.desc,.summary").first().text());
+  const title =
+    clean($("h1").first().text()) ||
+    clean($("title").text()).replace(/\s*[-|].*$/, "");
+
+  const description = clean(
+    $("meta[name='description']").attr("content") ||
+    $(".description,.desc,.summary").first().text()
+  );
+
   const poster = absoluteUrl(
     $("meta[property='og:image']").attr("content") ||
     $(".poster img").first().attr("src") ||
@@ -131,6 +153,7 @@ async function parseSeries(url, slug) {
   $("a[href]").each((_, el) => {
     const href = absoluteUrl($(el).attr("href"));
     if (!href || !href.startsWith(BASE_URL)) return;
+
     const text = clean($(el).text());
     const path = new URL(href).pathname;
     const m = (text + " " + path).match(/(?:tập|tap|episode)[\s._-]*(\d+)/i);
@@ -138,86 +161,82 @@ async function parseSeries(url, slug) {
 
     const ep = Number(m[1]);
     if (!Number.isFinite(ep) || seen.has(ep)) return;
+
     seen.add(ep);
     videos.push({
-      id: slug + ":ep-" + ep,
+      id: idFor(slug) + ":ep-" + ep,
       title: "Tập " + ep,
       season: 1,
       episode: ep,
-      released: new Date().toISOString(),
       overview: title,
       _yanhhUrl: href
     });
   });
 
   videos.sort((a, b) => a.episode - b.episode);
+
   return {
     id: idFor(slug),
     type: "series",
     name: title || slug,
-    poster,
-    description,
-    videos: videos.map(({ _yanhhUrl, ...v }) => v),
+    ...(poster ? { poster } : {}),
+    ...(description ? { description } : {}),
+    videos: videos.map(({ _yanhhUrl, ...video }) => video),
     _episodeUrls: Object.fromEntries(videos.map(v => [v.episode, v._yanhhUrl]))
   };
 }
 
-function extractStreams(html, episodeUrl) {
+function extractStreams(html) {
   const $ = cheerio.load(html);
   const streams = [];
   const seen = new Set();
 
-  const add = (url, name, quality) => {
+  const add = (url, name) => {
     if (!url) return;
     const absolute = absoluteUrl(url);
     if (!absolute || seen.has(absolute)) return;
     if (!/^https?:\/\//i.test(absolute)) return;
+
     seen.add(absolute);
     streams.push({
-      name: "YanHH3D" + (name ? " • " + name : "") + (quality ? " • " + quality : ""),
+      name: "YanHH3D" + (name ? " • " + name : ""),
       title: name || "YanHH3D",
       url: absolute
     });
   };
 
-  $("video source[src], video[src], source[src], iframe[src], iframe[data-src]").each((_, el) => {
+  $("video source[src], video[src], source[src]").each((_, el) => {
+    add($(el).attr("src"), "Direct");
+  });
+
+  $("iframe[src], iframe[data-src]").each((_, el) => {
     const url = $(el).attr("src") || $(el).attr("data-src");
-    const tag = el.name.toLowerCase();
-    if (tag === "iframe") {
-      const u = absoluteUrl(url);
-      if (u) add(u, "Player");
-    } else {
-      add(url, "Direct");
+    const absolute = absoluteUrl(url);
+    if (absolute && !seen.has(absolute)) {
+      seen.add(absolute);
+      streams.push({
+        name: "YanHH3D • Player",
+        externalUrl: absolute
+      });
     }
   });
 
   $("a[href]").each((_, el) => {
     const text = clean($(el).text());
-    const href = $(el).attr("href");
     if (/4k|1080|vietsub|thuyết minh|play|xem phim/i.test(text)) {
-      add(href, text);
+      add($(el).attr("href"), text);
     }
   });
 
-  // Some YanHH3D player pages expose URLs inside inline JavaScript.
   const scripts = $("script").map((_, el) => $(el).html() || "").get().join("\n");
   const patterns = [
     /https?:\\/\\/[^"'\\s]+\.(?:m3u8|mp4)(?:\?[^"'\\s]+)?/gi,
     /https?:\/\/[^"'\\s]+\.(?:m3u8|mp4)(?:\?[^"'\\s]+)?/gi
   ];
-  for (const re of patterns) {
-    for (const match of scripts.matchAll(re)) add(match[0].replace(/\\\//g, "/"), "Direct");
-  }
 
-  // If only an embedded player is exposed, return it as an external URL.
-  if (!streams.length) {
-    const iframe = $("iframe[src], iframe[data-src]").first();
-    const u = absoluteUrl(iframe.attr("src") || iframe.attr("data-src"));
-    if (u) {
-      streams.push({
-        name: "YanHH3D Player",
-        externalUrl: u
-      });
+  for (const re of patterns) {
+    for (const match of scripts.matchAll(re)) {
+      add(match[0].replace(/\\\//g, "/"), "Direct");
     }
   }
 
@@ -240,31 +259,37 @@ app.get("/catalog/series/yanhh3d.json", async (req, res) => {
 app.get("/meta/series/:id.json", async (req, res) => {
   try {
     const slug = slugFromId(req.params.id);
-    const meta = await parseSeries(BASE_URL + "/" + slug.replace(/^\//, ""), slug);
-    const cleanMeta = { ...meta };
-    delete cleanMeta._episodeUrls;
+    if (!slug) return res.status(400).json({ meta: null });
+
+    const meta = await parseSeries(BASE_URL + "/" + slug, slug);
+    delete meta._episodeUrls;
+
     res.set("Cache-Control", "public, max-age=300");
-    res.json({ meta: cleanMeta });
+    res.json({ meta });
   } catch (e) {
     console.error(e);
-    res.status(404).json({ meta: { id: req.params.id, type: "series", name: req.params.id } });
+    res.status(404).json({
+      meta: { id: req.params.id, type: "series", name: req.params.id }
+    });
   }
 });
 
 app.get("/stream/series/:id.json", async (req, res) => {
   try {
     const raw = String(req.params.id);
-    const parts = raw.split(":ep-");
-    const slug = parts[0];
-    const episode = Number(parts[1]);
+    const match = raw.match(/^(.+):ep-(\d+)$/);
+    if (!match) return res.json({ streams: [] });
+
+    const slug = slugFromId(match[1]);
+    const episode = Number(match[2]);
     if (!slug || !Number.isFinite(episode)) return res.json({ streams: [] });
 
-    const meta = await parseSeries(BASE_URL + "/" + slug.replace(/^\//, ""), slug);
+    const meta = await parseSeries(BASE_URL + "/" + slug, slug);
     const episodeUrl = meta._episodeUrls?.[episode];
     if (!episodeUrl) return res.json({ streams: [] });
 
     const html = await getHtml(episodeUrl);
-    const streams = extractStreams(html, episodeUrl);
+    const streams = extractStreams(html);
 
     res.set("Cache-Control", "public, max-age=120");
     res.json({ streams });
