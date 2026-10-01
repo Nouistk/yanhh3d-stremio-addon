@@ -430,9 +430,9 @@ app.get("/manifest.json", async (_, res) => {
       name: "Catalog VN + Torrentio + Comet",
       description: "Catalog VN với nguồn phát Torrentio và Comet.",
       resources: [
-        { name: "catalog", types, idPrefixes },
-        { name: "meta", types, idPrefixes },
-        { name: "stream", types, idPrefixes }
+        { name: "catalog", types },
+        { name: "meta", types },
+        { name: "stream", types }
       ],
       types,
       catalogs: Array.isArray(m.catalogs) ? m.catalogs : [],
@@ -505,9 +505,26 @@ async function vnMeta(type, id) {
 }
 
 function vnImdb(data, id) {
-  if (/^tt\d+/.test(String(id))) return String(id).split(":")[0];
+  const raw = String(id || "");
+  if (/^tt\d+/.test(raw)) return raw.split(":")[0];
+
   const m = data?.meta || data || {};
-  return m.imdb_id || m.imdbId || m.imdb || m.ids?.imdb || m.external_ids?.imdb_id || null;
+  const candidates = [
+    m.imdb_id, m.imdbId, m.imdb, m.imdbID,
+    m.ids?.imdb, m.ids?.imdb_id,
+    m.external_ids?.imdb_id, m.external_ids?.imdb,
+    m.externalIds?.imdb, m.externalIds?.imdb_id,
+    m._id
+  ];
+
+  for (const value of candidates) {
+    const match = String(value || "").match(/tt\d+/i);
+    if (match) return match[0];
+  }
+
+  const metaId = String(m.id || "");
+  const match = metaId.match(/tt\d+/i);
+  return match ? match[0] : null;
 }
 
 async function vnStreams(base, type, id) {
