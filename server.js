@@ -16,7 +16,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.1.1",
+  version: "1.1.2",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -457,8 +457,17 @@ app.get("/stream/series/:id.json", async (req, res) => {
     const episodeUrl = absoluteUrl(slug);
     if (!episodeUrl) return res.json({ streams: [] });
 
+    console.log("[STREAM] request id=" + req.params.id);
+    console.log("[STREAM] episodeUrl=" + episodeUrl);
+
     const html = await getHtmlWithReferer(episodeUrl, BASE_URL);
+    console.log("[STREAM] episode html length=" + html.length);
+    console.log("[STREAM] has list-severs=" + /list-severs/i.test(html));
+    console.log("[STREAM] data-src count=" + (html.match(/data-src\\s*=/gi) || []).length);
+
     const streams = await extractStreams(html, episodeUrl);
+    console.log("[STREAM] resolved streams=" + streams.length);
+    if (streams.length) console.log("[STREAM] first=" + streams[0].url);
 
     // Never return externalUrl: every returned source must be an actual media URL
     // that Stremio can play in its own player.
