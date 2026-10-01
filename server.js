@@ -97,7 +97,14 @@ function parseCards(html) {
       $(el).text()
     );
     const img = $(el).find("img").first();
-    const poster = img.attr("data-src") || img.attr("data-lazy-src") || img.attr("src");
+    const poster =
+      img.attr("data-src") ||
+      img.attr("data-lazy-src") ||
+      img.attr("data-original") ||
+      img.attr("data-wpfc-original-src") ||
+      img.attr("data-fifu-src") ||
+      img.attr("src") ||
+      (img.attr("srcset") || img.attr("data-srcset") || "").split(",")[0].trim().split(" ")[0];
 
     if (!title || title.length < 2 || title.length > 180) return;
     if (!/(tu-tien|phim|hoat-hinh|donghua|series|anime)/i.test(path)) return;
@@ -109,11 +116,30 @@ function parseCards(html) {
       id,
       type: "series",
       name: title,
+      sourceUrl: href,
       ...(absoluteUrl(poster) ? { poster: absoluteUrl(poster) } : {})
     });
   });
 
-  return items.slice(0, 100);
+  const selected = items.slice(0, 40);
+  await Promise.all(selected.map(async (item) => {
+    if (item.poster || !item.sourceUrl) return;
+    try {
+      const detailHtml = await getHtml(item.sourceUrl);
+      const $d = cheerio.load(detailHtml);
+      const og = $d('meta[property="og:image"]').attr("content");
+      const img = $d("img").first();
+      const fallback =
+        og ||
+        img.attr("data-src") ||
+        img.attr("data-lazy-src") ||
+        img.attr("data-original") ||
+        img.attr("data-wpfc-original-src") ||
+        img.attr("src");
+      if (fallback) item.poster = absoluteUrl(fallback);
+    } catch {}
+  }));
+  return selected.map(({ sourceUrl, ...item }) => item);
 }
 
 async function catalog(search) {
@@ -199,52 +225,73 @@ function extractStreams(html) {
   const streams = [];
   const seen = new Set();
 
-  const add = (url, name) => {
+  const add = (url, name, external = false) => {
     if (!url) return;
-    const absolute = absoluteUrl(url);
-    if (!absolute || seen.has(absolute)) return;
-    if (!/^https?:\/\//i.test(absolute)) return;
+    let value = String(url).trim()
+      .replace(/\\\//g, "/")
+      .replace(/&amp;/g, "&")
+      .replace(/^['"]|['"]$/g, "");
+    if (!/^https?:\/\//i.test(value)) return;
+    if (seen.has(value)) return;
+    seen.add(value);
 
-    seen.add(absolute);
+    if (external) {
+      streams.push({
+        name: "YanHH3D • " + (name || "Player"),
+        title: name || "Player",
+        externalUrl: value
+      });
+      return;
+    }
+
     streams.push({
-      name: "YanHH3D" + (name ? " • " + name : ""),
-      title: name || "YanHH3D",
-      url: absolute
+      name: "YanHH3D • " + (name || "Direct"),
+      title: name || "Direct",
+      url: value
     });
   };
 
-  $("video source[src], video[src], source[src]").each((_, el) => {
-    add($(el).attr("src"), "Direct");
+  // Native HTML5 video/source.
+  $("video, video source, source").each((_, el) => {
+    add($(el).attr("src") || $(el).attr("data-src") || $(el).attr("data-url"), "Direct");
   });
 
-  $("iframe[src], iframe[data-src]").each((_, el) => {
-    const url = $(el).attr("src") || $(el).attr("data-src");
-    const absolute = absoluteUrl(url);
-    if (absolute && !seen.has(absolute)) {
-      seen.add(absolute);
-      streams.push({
-        name: "YanHH3D • Player",
-        externalUrl: absolute
-      });
-    }
+  // Common embedded-player attributes.
+  $("iframe, [data-player], [data-video], [data-src], [data-url], [data-embed]").each((_, el) => {
+    const url =
+      $(el).attr("src") ||
+      $(el).attr("data-src") ||
+      $(el).attr("data-url") ||
+      $(el).attr("data-player") ||
+      $(el).attr("data-video") ||
+      $(el).attr("data-embed");
+    if (url) add(url, "Player", true);
   });
 
-  $("a[href]").each((_, el) => {
+  // Links that are visibly server/player choices.
+  $("a[href], button[data-url], button[data-src]").each((_, el) => {
     const text = clean($(el).text());
-    if (/4k|1080|vietsub|thuyết minh|play|xem phim/i.test(text)) {
-      add($(el).attr("href"), text);
+    const url = $(el).attr("href") || $(el).attr("data-url") || $(el).attr("data-src");
+    if (/4k|1080|vietsub|thuyết minh|server|play|xem phim|v1|v2/i.test(text) && url) {
+      if (/\.(m3u8|mp4)(\?|$)/i.test(url)) add(url, text);
+      else add(url, text, true);
     }
   });
 
+  // Search inline scripts and JSON for media/player URLs.
   const scripts = $("script").map((_, el) => $(el).html() || "").get().join("\n");
-  const patterns = [
-    /https?:\/\/[^"'\\s]+\.(?:m3u8|mp4)(?:\?[^"'\\s]+)?/gi
-  ];
+  const decoded = scripts
+    .replace(/\\\//g, "/")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&");
 
-  for (const re of patterns) {
-    for (const match of scripts.matchAll(re)) {
-      add(match[0].replace(/\\\//g, "/"), "Direct");
-    }
+  const directRe = /https?:\/\/[^"'\\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\\s<>]*)?/gi;
+  for (const match of decoded.matchAll(directRe)) add(match[0], "Direct");
+
+  const urlRe = /https?:\/\/[^"'\\s<>]+/gi;
+  for (const match of decoded.matchAll(urlRe)) {
+    const url = match[0].replace(/[),;}"']+$/, "");
+    if (/player|embed|stream|video|watch|m3u8|mp4/i.test(url)) add(url, "Player", !/\.(m3u8|mp4)(\?|$)/i.test(url));
   }
 
   return streams;
@@ -299,7 +346,15 @@ app.get("/stream/series/:id.json", async (req, res) => {
     if (!episodeUrl) return res.json({ streams: [] });
 
     const html = await getHtml(episodeUrl);
-    const streams = extractStreams(html);
+    let streams = extractStreams(html);
+
+    if (!streams.length) {
+      streams = [{
+        name: "YanHH3D • Xem trên website",
+        title: "Mở player YanHH3D",
+        externalUrl: episodeUrl
+      }];
+    }
 
     res.set("Cache-Control", "public, max-age=120");
     res.json({ streams });
