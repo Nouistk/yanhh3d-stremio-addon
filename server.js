@@ -515,10 +515,24 @@ app.get("/vn/manifest.json", async (_, res) => {
 app.use("/vn", async (req, res, next) => {
   try {
     const p = req.path.split("/").filter(Boolean);
-    if (p.length < 3 || p[0] !== "stream") return next();
+    if (p.length < 3) return next();
+
+    const resource = p[0];
     const type = decodeURIComponent(p[1]);
     const last = p[p.length - 1];
     const id = decodeURIComponent(last.endsWith(".json") ? last.slice(0, -5) : last);
+
+    if (resource === "catalog" || resource === "meta") {
+      const upstream = CTG + "/" + resource + "/" + encodeURIComponent(type) + "/" + encodeURIComponent(id) + ".json";
+      const r = await fetch(upstream, {
+        headers: { "User-Agent": "Stremio-Catalog-VN/1.0", "Accept": "application/json" }
+      });
+      if (!r.ok) return res.status(r.status).json({ error: "Catalog VN HTTP " + r.status });
+      res.set("Cache-Control", "public, max-age=60");
+      return res.status(200).type("application/json").send(await r.text());
+    }
+
+    if (resource !== "stream") return next();
 
     const meta = await vnMeta(type, id);
     const imdb = vnImdb(meta, id);
@@ -528,7 +542,9 @@ app.use("/vn", async (req, res, next) => {
     if (type === "series") {
       const parts = String(id).split(":");
       const nums = parts.filter(x => /^\d+$/.test(x)).map(Number);
-      if (nums.length >= 2) providerId = imdb + ":" + nums[nums.length - 2] + ":" + nums[nums.length - 1];
+      if (nums.length >= 2) {
+        providerId = imdb + ":" + nums[nums.length - 2] + ":" + nums[nums.length - 1];
+      }
     }
 
     const [torrentio, comet] = await Promise.all([
@@ -545,10 +561,10 @@ app.use("/vn", async (req, res, next) => {
     });
 
     res.set("Cache-Control", "public, max-age=30");
-    res.json({ streams });
+    return res.json({ streams });
   } catch (e) {
-    console.error("[VN STREAM]", e);
-    res.status(502).json({ streams: [] });
+    console.error("[VN PROXY]", e);
+    return res.status(502).json({ error: "Upstream request failed", streams: [] });
   }
 });
 
