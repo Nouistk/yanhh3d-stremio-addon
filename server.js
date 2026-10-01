@@ -586,6 +586,22 @@ async function runHHPandaDiagnostic() {
     console.log("[HHP-DIAG] scripts=" + JSON.stringify(scripts));
     console.log("[HHP-DIAG] forms=" + JSON.stringify(forms));
     console.log("[HHP-DIAG] textHits=" + JSON.stringify(textHits));
+
+    try {
+      const scriptUrl = "https://hhpanda.st/wp-content/litespeed/js/61c75f357dea0ea23788246459459591.js?ver=788246459459591";
+      const sr = await fetch(scriptUrl, { headers: { "User-Agent": "Mozilla/5.0", "Referer": url }, redirect: "follow" });
+      const js = await sr.text();
+      const low = js.toLowerCase();
+      const keys = ["play-listsv","halim-ajax-list-server","hx_ajax_url","get-eps","admin-ajax.php","dox_ajax_player","player.php"];
+      const contexts = [];
+      for (const k of keys) {
+        const pos = low.indexOf(k);
+        if (pos >= 0) contexts.push({key:k,context:js.slice(Math.max(0,pos-1000),Math.min(js.length,pos+3000))});
+      }
+      console.log("[HHP-DIAG] singleScript status=" + sr.status + " len=" + js.length + " contexts=" + JSON.stringify(contexts));
+    } catch (e) {
+      console.log("[HHP-DIAG] singleScriptError=" + (e.message || String(e)));
+    }
   } catch (e) {
     console.log("[HHP-DIAG] error=" + (e.stack || e.message || String(e)));
   }
