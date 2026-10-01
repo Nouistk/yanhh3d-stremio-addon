@@ -1,5 +1,6 @@
 const express = require("express");
 const cheerio = require("cheerio");
+const { getPlayerFrames } = require("./player");
 
 const app = express();
 app.disable("x-powered-by");
@@ -16,7 +17,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.1.8",
+  version: "1.2.0",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -457,39 +458,13 @@ app.get("/stream/series/:id.json", async (req, res) => {
     const episodeUrl = absoluteUrl(slug);
     if (!episodeUrl) return res.json({ streams: [] });
 
-    console.log("[STREAM] request id=" + req.params.id);
-    console.log("[STREAM] episodeUrl=" + episodeUrl);
+    const streams = await getPlayerFrames(episodeUrl, BASE_URL);
+    console.log("[STREAM] " + episodeUrl + " -> " + streams.length + " PlayerFrame sources");
 
-    const html = await getHtmlWithReferer(episodeUrl, BASE_URL);
-    console.log("[STREAM] episode html length=" + html.length);
-    console.log("[STREAM] has list-severs=" + /list-severs/i.test(html));
-    console.log("[STREAM] data-src count=" + (html.match(/data-src\\s*=/gi) || []).length);
-    const classMatches = [...html.matchAll(/class=["'][^"']*list-severs[^"']*["']/gi)];
-    const signalPatterns = [
-      /sv_LINK\\d+/gi,
-      /data-obf/gi,
-      /\\.m3u8/gi,
-      /fbcdn/gi,
-      /player/gi,
-      /data-src/gi
-    ];
-    console.log("[STREAM] real list-severs class count=" + classMatches.length);
-    console.log("[STREAM] signal counts=" + signalPatterns.map(re => (html.match(re) || []).length).join(","));
-    if (classMatches.length) {
-      const marker = classMatches[0].index;
-      console.log("[STREAM] REAL SERVER SNIPPET=" + html.slice(Math.max(0, marker - 500), marker + 12000));
-    }
-
-    const streams = await extractStreams(html, episodeUrl);
-    console.log("[STREAM] resolved streams=" + streams.length);
-    if (streams.length) console.log("[STREAM] first=" + streams[0].url);
-
-    // Never return externalUrl: every returned source must be an actual media URL
-    // that Stremio can play in its own player.
-    res.set("Cache-Control", "public, max-age=60");
+    res.set("Cache-Control", "public, max-age=30");
     res.json({ streams });
   } catch (e) {
-    console.error(e);
+    console.error("stream error", e);
     res.status(502).json({ streams: [] });
   }
 });
