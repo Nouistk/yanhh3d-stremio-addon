@@ -2,6 +2,14 @@ const express = require("express");
 const cheerio = require("cheerio");
 
 const app = express();
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "*");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 const PORT = process.env.PORT || 7000;
 const BASE_URL = (process.env.YANHH3D_BASE_URL || "https://yanhh3d.ee").replace(/\/$/, "");
 const CACHE_MS = Number(process.env.CACHE_MS || 300000);
@@ -242,7 +250,7 @@ function extractStreams(html) {
   return streams;
 }
 
-app.get("/manifest.json", (_, res) => res.json(manifest));
+app.get("/manifest.json", (_, res) => {\n  res.set("Cache-Control", "no-store");\n  res.type("application/json").send(JSON.stringify(manifest));\n});
 
 app.get("/catalog/series/yanhh3d.json", async (req, res) => {
   try {
@@ -304,6 +312,6 @@ app.get("/", (_, res) => {
   );
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log("YanHH3D Stremio addon listening on port " + PORT);
 });
