@@ -16,7 +16,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.1.4",
+  version: "1.1.5",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -500,6 +500,55 @@ app.get("/", (_, res) => {
   );
 });
 
+
+async function diagnoseLivePlayer() {
+  const episodeUrl = BASE_URL + "/tu-tien/muc-than-ky/tap-1.html";
+  try {
+    const html = await getHtmlWithReferer(episodeUrl, BASE_URL);
+    const $ = cheerio.load(html);
+    const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get().map(absoluteUrl).filter(Boolean);
+    const inlineScripts = $("script:not([src])").map((_, el) => $(el).html() || "").get();
+
+    console.log("[DIAG] episode status html=" + html.length);
+    console.log("[DIAG] list_sv elements=" + $("#list_sv").length + " children=" + $("#list_sv").find("*").length);
+    console.log("[DIAG] data-post-id=" + (html.match(/data-post-id/gi) || []).length);
+    console.log("[DIAG] data-ep=" + (html.match(/data-ep/gi) || []).length);
+    console.log("[DIAG] scripts=" + scripts.length);
+
+    for (const src of scripts) {
+      try {
+        const text = await getHtmlWithReferer(src, episodeUrl);
+        const low = text.toLowerCase();
+        const hits = ["list_sv", "sv_link", "data-post-id", "ajax", "m3u8", "player", "video"].filter(x => low.includes(x));
+        if (!hits.length) continue;
+
+        console.log("[DIAG] SCRIPT " + src + " hits=" + hits.join(",") + " len=" + text.length);
+
+        for (const term of hits.slice(0, 4)) {
+          const pos = low.indexOf(term);
+          if (pos >= 0) {
+            console.log("[DIAG] " + src + " :: " + term + " :: " +
+              text.slice(Math.max(0, pos - 400), Math.min(text.length, pos + 1400)));
+          }
+        }
+      } catch (e) {
+        console.log("[DIAG] script fetch failed " + src + " :: " + e.message);
+      }
+    }
+
+    for (const text of inlineScripts) {
+      const low = text.toLowerCase();
+      if (/(list_sv|sv_link|data-post-id|ajax|m3u8)/.test(low)) {
+        console.log("[DIAG] INLINE :: " + text.slice(0, 4000));
+      }
+    }
+  } catch (e) {
+    console.log("[DIAG] failed :: " + e.message);
+  }
+}
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log("YanHH3D Stremio addon listening on port " + PORT);
 });
+
+diagnoseLivePlayer();
