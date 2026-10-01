@@ -561,6 +561,11 @@ async function runStreamFreeDiagnostic() {
         console.log("[SF-DIAG] url=" + url);
         console.log("[SF-DIAG] status=" + response.status + " contentType=" + (response.headers.get("content-type") || "") + " len=" + body.length);
         console.log("[SF-DIAG] title=" + JSON.stringify($("title").text()));
+        for (const term of ["jwplayer", "setup(", "sources", "file:", "playlist", "data-", "token", "nonce"]) {
+          const low3 = body.toLowerCase();
+          const p3 = low3.indexOf(term.toLowerCase());
+          if (p3 >= 0) console.log("[SF-DIAG] htmlContext " + term + "=" + JSON.stringify(body.slice(Math.max(0,p3-300), Math.min(body.length,p3+1200))));
+        }
         console.log("[SF-DIAG] m3u8Hits=" + JSON.stringify(links.slice(0, 20)));
         console.log("[SF-DIAG] scriptUrls=" + JSON.stringify(scripts.slice(0, 20)));
 
