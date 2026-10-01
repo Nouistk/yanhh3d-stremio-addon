@@ -57,8 +57,28 @@ async function getHHPandaStreams(episodeUrl) {
       }
     };
 
-    page.on("request", (request) => capture(request.url()));
-    page.on("response", (response) => capture(response.url()));
+    page.on("request", (request) => {
+      const u = request.url();
+      capture(u);
+      if (process.env.HHPANDA_DIAG === "1" &&
+          (/streamfree\.vip\/embed\//i.test(u) || /\/(?:hls|api)\//i.test(u) || /\.m3u8(?:\?|$)/i.test(u) || /\.mp4(?:\?|$)/i.test(u))) {
+        console.log("[HHP-REQ] " + u);
+      }
+    });
+    page.on("response", (response) => {
+      const u = response.url();
+      capture(u);
+      if (process.env.HHPANDA_DIAG === "1" &&
+          (/streamfree\.vip\/embed\//i.test(u) || /\/(?:hls|api)\//i.test(u) || /\.m3u8(?:\?|$)/i.test(u) || /\.mp4(?:\?|$)/i.test(u))) {
+        console.log("[HHP-RESP] " + response.status() + " " + u);
+      }
+    });
+    page.on("frameattached", (frame) => {
+      if (process.env.HHPANDA_DIAG === "1") console.log("[HHP-FRAME+] " + frame.url());
+    });
+    page.on("framenavigated", (frame) => {
+      if (process.env.HHPANDA_DIAG === "1") console.log("[HHP-FRAME>] " + frame.url());
+    });
 
     await page.goto(hhpandaUrl, { waitUntil: "domcontentloaded", timeout: 25000 });
     await page.waitForTimeout(1500);
@@ -78,7 +98,7 @@ async function getHHPandaStreams(episodeUrl) {
       try {
         const locator = page.locator('#halim-ajax-list-server .play-listsv[data-type="' + button.type.replace(/"/g, '\"') + '"]').first();
         await locator.click({ timeout: 5000 });
-        await page.waitForTimeout(1800);
+        await page.waitForTimeout(5000);
 
         const iframeSrc = await page.locator("#halim-player-wrapper iframe").getAttribute("src").catch(() => null);
         capture(iframeSrc);
