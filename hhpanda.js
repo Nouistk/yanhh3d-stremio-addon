@@ -69,6 +69,9 @@ async function getHHPandaStreams(episodeUrl) {
         label: (el.textContent || "").replace(/\s+/g, " ").trim()
       }))
     );
+    if (process.env.HHPANDA_DIAG === "1") {
+      console.log("[HHP-PLAY] url=" + hhpandaUrl + " buttons=" + JSON.stringify(buttons));
+    }
 
     // Try server buttons in page order, stopping once a direct media URL appears.
     for (const button of buttons.slice(0, 4)) {
@@ -79,6 +82,9 @@ async function getHHPandaStreams(episodeUrl) {
 
         const iframeSrc = await page.locator("#halim-player-wrapper iframe").getAttribute("src").catch(() => null);
         capture(iframeSrc);
+        if (process.env.HHPANDA_DIAG === "1") {
+          console.log("[HHP-PLAY] clicked=" + button.type + " iframe=" + JSON.stringify(iframeSrc) + " mediaCount=" + media.size);
+        }
 
         if (media.size >= 1) {
           const urls = Array.from(media.keys()).filter((x) => /\.(?:m3u8|mp4)(?:\?|$)/i.test(x));
