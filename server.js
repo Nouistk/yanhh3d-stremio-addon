@@ -536,8 +536,8 @@ async function diagnoseLivePlayer() {
       const fn = "load" + "Player";
       const pos = inline.indexOf("function " + fn);
       const playerChunk = pos >= 0 ? inline.slice(pos, pos + 5000) : inline;
-      const urlMatch = playerChunk.match(/\\burl\\s*:\\s*['"]([^'"]+)['"]/);
-      const actionMatch = playerChunk.match(/\\baction\\s*:\\s*['"]([^'"]+)['"]/);
+      const urlMatch = playerChunk.match(/\burl\s*:\s*['"]([^'"]+)['"]/);
+      const actionMatch = playerChunk.match(/\baction\s*:\s*['"]([^'"]+)['"]/);
       const playerUrl = urlMatch && urlMatch[1];
       const playerAction = actionMatch && actionMatch[1];
       console.log("[DIAG] PLAYER_FOUND pos=" + pos + " url=" + JSON.stringify(playerUrl) + " action=" + JSON.stringify(playerAction));
