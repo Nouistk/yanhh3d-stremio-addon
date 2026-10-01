@@ -285,7 +285,7 @@ function decodePlayerConfig(value) {
     return decoded
       .replace(/&quot;/g, '"')
       .replace(/&amp;/g, "&")
-      .replace(/\\\//g, "/");
+      .replace(/\\//g, "/");
   } catch {
     return "";
   }
@@ -294,7 +294,7 @@ function decodePlayerConfig(value) {
 async function resolveYanSource(sourceUrl, episodeUrl, label) {
   if (!sourceUrl) return null;
 
-  const direct = String(sourceUrl).trim().replace(/&amp;/g, "&").replace(/\\\//g, "/");
+  const direct = String(sourceUrl).trim().replace(/&amp;/g, "&").replace(/\\//g, "/");
   if (/\.(?:m3u8|mp4)(?:\?|$)/i.test(direct) === false) return null;
 
   try {
@@ -314,7 +314,7 @@ async function resolveYanSource(sourceUrl, episodeUrl, label) {
       const config = decodePlayerConfig(obf);
       const match = config.match(/"pU"\s*:\s*"([^"]+)"/i);
       if (match && match[1]) {
-        const playlist = absoluteUrl(match[1].replace(/\\\//g, "/"));
+        const playlist = absoluteUrl(match[1].replace(/\\//g, "/"));
         if (playlist) {
           return {
             url: playlist,
@@ -562,7 +562,7 @@ function extractImdb(meta) {
 
 function parseEpisodeFromId(id) {
   const s = String(id || "");
-  const m = s.match(/(?:^|:)(\\d+)(?::(\\d+))?$/);
+  const m = s.match(/(?:^|:)(\d+)(?::(\d+))?$/);
   if (!m) return { season: null, episode: null };
   if (m[2]) return { season: Number(m[1]), episode: Number(m[2]) };
   return { season: 1, episode: Number(m[1]) };
@@ -579,11 +579,11 @@ async function resolveCombinedMeta(type, id) {
 }
 
 async function resolveImdb(type, id) {
-  if (/^tt\\d+/.test(String(id))) return String(id).split(":")[0];
+  if (/^tt\d+/.test(String(id))) return String(id).split(":")[0];
 
   const data = await resolveCombinedMeta(type, id);
   const direct = extractImdb(data);
-  if (direct && /^tt\\d+$/.test(String(direct))) return String(direct);
+  if (direct && /^tt\d+$/.test(String(direct))) return String(direct);
 
   const m = data?.meta || data || {};
   if (Array.isArray(m.videos)) {
@@ -621,8 +621,8 @@ async function findKkphimSlugByImdb(imdb, title) {
       $("a[href*='/phim/']").each((_, el) => {
         if (slug) return;
         const href = $(el).attr("href") || "";
-        if (/\\/phim\\/[^/?#]+/i.test(href)) {
-          slug = href.match(/\\/phim\\/([^/?#]+)/i)?.[1] || null;
+        if (/\//gphim\/[^/?#]+/i.test(href)) {
+          slug = href.match(/\//gphim\/([^/?#]+)/i)?.[1] || null;
         }
       });
       if (slug) return slug;
@@ -650,7 +650,7 @@ async function getKkphimStreams(type, id, imdb, meta) {
       const rows = Array.isArray(server.server_data) ? server.server_data : [];
       for (const row of rows) {
         const n = String(row.name || "");
-        const em = n.match(/(?:tập|episode|ep)\\s*0*(\\d+)/i);
+        const em = n.match(/(?:tập|episode|ep)\\s*0*(\d+)/i);
         const rowEp = em ? Number(em[1]) : null;
         if (ep.episode && rowEp && rowEp !== ep.episode) continue;
         const url = row.link_m3u8 || row.link_embed;
@@ -713,12 +713,12 @@ app.use("/vn", async (req, res, next) => {
       return res.json(m);
     }
 
-    const match = path.match(/^\\/(catalog|meta|stream)\\/([^/]+)\\/(.+?)(?:\\.json)?$/);
+    const match = path.match(/^\/(catalog|meta|stream)\/([^/]+)\/(.+?)(?:\\.json)?$/);
     if (!match) return next();
 
     const resource = match[1];
     const type = decodeURIComponent(match[2]);
-    const id = decodeURIComponent(match[3].replace(/\\.json$/, ""));
+    const id = decodeURIComponent(match[3].replace(/\.json$/, ""));
 
     if (resource !== "stream") {
       const upstream = CTG_BASE_URL + "/" + resource + "/" +
