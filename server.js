@@ -580,6 +580,13 @@ async function runStreamFreeDiagnostic() {
             const hits = ["m3u8", "hls", "master", "manifest", "source", "stream"].filter(x => low.includes(x));
             if (hits.length) {
               console.log("[SF-DIAG] script=" + abs + " status=" + sr.status + " len=" + text.length + " hits=" + hits.join(","));
+              for (const term of ["m3u8", "hls", "playlist", "sources", "jwplayer"]) {
+                const low2 = text.toLowerCase();
+                let pos = low2.indexOf(term);
+                if (pos >= 0) {
+                  console.log("[SF-DIAG] context " + term + "=" + JSON.stringify(text.slice(Math.max(0, pos - 500), Math.min(text.length, pos + 1500))));
+                }
+              }
             }
           } catch (e) {}
         }
