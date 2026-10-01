@@ -1,6 +1,7 @@
 const express = require("express");
 const cheerio = require("cheerio");
 const { getPlayerFrames } = require("./player");
+const { getHHPandaStreams } = require("./hhpanda");
 
 const app = express();
 app.disable("x-powered-by");
@@ -17,7 +18,7 @@ const CACHE_MS = Number(process.env.CACHE_MS || 300000);
 
 const manifest = {
   id: "com.nouistk.yanhh3d",
-  version: "1.5.0",
+  version: "1.6.0",
   name: "YanHH3D",
   description: "YanHH3D donghua catalog and streams for Stremio.",
   resources: [
@@ -501,8 +502,17 @@ app.get("/stream/series/:id.json", async (req, res) => {
     const episodeUrl = absoluteUrl(slug);
     if (!episodeUrl) return res.json({ streams: [] });
 
+    // Prefer direct media discovered from HHPanda itself.
+    const hhpandaStreams = await getHHPandaStreams(episodeUrl);
+    if (hhpandaStreams.length) {
+      console.log("[STREAM] HHPanda direct sources:", hhpandaStreams.length);
+      res.set("Cache-Control", "public, max-age=30");
+      return res.json({ streams: hhpandaStreams });
+    }
+
+    // Keep YanHH3D resolver as fallback for source discovery.
     const streams = await getPlayerFrames(episodeUrl, BASE_URL);
-    console.log("[STREAM] PlayerFrame sources:", streams.length);
+    console.log("[STREAM] PlayerFrame fallback sources:", streams.length);
 
     res.set("Cache-Control", "public, max-age=30");
     res.json({ streams });
@@ -511,102 +521,6 @@ app.get("/stream/series/:id.json", async (req, res) => {
     res.status(502).json({ streams: [] });
   }
 });
-
-
-async function runHHPandaDiagnostic() {
-  if (process.env.HHPANDA_DIAG !== "1") return;
-
-  const url = "https://hhpanda.st/watch-muc-than-ky/tap-1-sv1.html";
-  try {
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"
-      },
-      redirect: "follow"
-    });
-    const body = await response.text();
-    const $ = cheerio.load(body);
-
-    const iframes = $("iframe").map((_, el) => ({
-      src: $(el).attr("src") || "",
-      dataSrc: $(el).attr("data-src") || "",
-      title: $(el).attr("title") || ""
-    })).get();
-
-    const videos = $("video, source").map((_, el) => ({
-      tag: el.tagName,
-      src: $(el).attr("src") || "",
-      dataSrc: $(el).attr("data-src") || "",
-      type: $(el).attr("type") || ""
-    })).get();
-
-    const mediaAttrs = [];
-    $("[data-src],[data-url],[data-m3u8],[data-file],[data-video]").each((_, el) => {
-      mediaAttrs.push({
-        tag: el.tagName,
-        id: $(el).attr("id") || "",
-        cls: $(el).attr("class") || "",
-        src: $(el).attr("data-src") || "",
-        url: $(el).attr("data-url") || "",
-        m3u8: $(el).attr("data-m3u8") || "",
-        file: $(el).attr("data-file") || "",
-        video: $(el).attr("data-video") || ""
-      });
-    });
-
-    const scripts = $("script[src]").map((_, el) => $(el).attr("src")).get();
-    const forms = $("form").map((_, el) => ({
-      action: $(el).attr("action") || "",
-      method: $(el).attr("method") || ""
-    })).get();
-
-    const textHits = [];
-    for (const term of ["m3u8", "mp4", "iframe", "player", "ajax", "source", "file", "sv1", "watch"]) {
-      if (body.toLowerCase().includes(term)) textHits.push(term);
-    }
-
-    console.log("[HHP-DIAG] status=" + response.status + " type=" + (response.headers.get("content-type") || "") + " len=" + body.length);
-    console.log("[HHP-DIAG] finalUrl=" + response.url);
-    console.log("[HHP-DIAG] title=" + JSON.stringify($("title").text()));
-    console.log("[HHP-DIAG] iframes=" + JSON.stringify(iframes));
-    console.log("[HHP-DIAG] videos=" + JSON.stringify(videos));
-    console.log("[HHP-DIAG] mediaAttrs=" + JSON.stringify(mediaAttrs.slice(0, 50)));
-
-    const frameNodes = $("iframe").map((_, el) => $.html(el.parent || el)).get();
-    console.log("[HHP-DIAG] iframeParents=" + JSON.stringify(frameNodes.slice(0, 10)));
-
-    for (const term of ["iframe", "player", "sv1", "admin-ajax.php", "wpd", "watch-muc-than-ky"]) {
-      const low = body.toLowerCase();
-      const pos = low.indexOf(term.toLowerCase());
-      if (pos >= 0) {
-        console.log("[HHP-DIAG] context " + term + "=" + JSON.stringify(body.slice(Math.max(0, pos - 1200), Math.min(body.length, pos + 3000))));
-      }
-    }
-    console.log("[HHP-DIAG] scripts=" + JSON.stringify(scripts));
-    console.log("[HHP-DIAG] forms=" + JSON.stringify(forms));
-    console.log("[HHP-DIAG] textHits=" + JSON.stringify(textHits));
-
-    try {
-      const scriptUrl = "https://hhpanda.st/wp-content/litespeed/js/61c75f357dea0ea23788246459459591.js?ver=788246459459591";
-      const sr = await fetch(scriptUrl, { headers: { "User-Agent": "Mozilla/5.0", "Referer": url }, redirect: "follow" });
-      const js = await sr.text();
-      const low = js.toLowerCase();
-      const keys = ["play-listsv","halim-ajax-list-server","hx_ajax_url","get-eps","admin-ajax.php","dox_ajax_player","player.php"];
-      const contexts = [];
-      for (const k of keys) {
-        const pos = low.indexOf(k);
-        if (pos >= 0) contexts.push({key:k,context:js.slice(Math.max(0,pos-1000),Math.min(js.length,pos+3000))});
-      }
-      console.log("[HHP-DIAG] singleScript status=" + sr.status + " len=" + js.length + " contexts=" + JSON.stringify(contexts));
-    } catch (e) {
-      console.log("[HHP-DIAG] singleScriptError=" + (e.message || String(e)));
-    }
-  } catch (e) {
-    console.log("[HHP-DIAG] error=" + (e.stack || e.message || String(e)));
-  }
-}
-runHHPandaDiagnostic();
 
 app.get("/", (_, res) => {
   res.type("html").send(
