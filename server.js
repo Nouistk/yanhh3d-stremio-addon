@@ -585,6 +585,20 @@ async function runStreamFreeDiagnostic() {
             const hits = ["m3u8", "hls", "master", "manifest", "source", "stream"].filter(x => low.includes(x));
             if (hits.length) {
               console.log("[SF-DIAG] script=" + abs + " status=" + sr.status + " len=" + text.length + " hits=" + hits.join(","));
+              if (/app\\.e2c7174e\\.js$/.test(abs)) {
+                const stringHits = [...text.matchAll(/["']([^"'\\\\]{1,180})["']/g)]
+                  .map(m => m[1])
+                  .filter(s => /api|player|video|nonce|m3u8|stream|source|checksum|uip|hrm|ajax|\\.php|\\/api\\//i.test(s))
+                  .filter((s, i, a) => a.indexOf(s) === i)
+                  .slice(0, 80);
+                console.log("[SF-DIAG] stringHits=" + JSON.stringify(stringHits));
+                const fetchPositions = [];
+                for (const term of ["fetch(", "XMLHttpRequest", "axios", "/api/", ".php", "data-nonce", "hrm-player"]) {
+                  const pos = text.toLowerCase().indexOf(term.toLowerCase());
+                  if (pos >= 0) fetchPositions.push({term, context:text.slice(Math.max(0,pos-600), Math.min(text.length,pos+1800))});
+                }
+                console.log("[SF-DIAG] codeHits=" + JSON.stringify(fetchPositions));
+              }
               for (const term of ["m3u8", "hls", "playlist", "sources", "jwplayer"]) {
                 const low2 = text.toLowerCase();
                 let pos = low2.indexOf(term);
