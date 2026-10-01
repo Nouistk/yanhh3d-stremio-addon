@@ -530,6 +530,18 @@ app.get("/", (_, res) => {
 
 
 
+async function runHHPandaSelfTest() {
+  if (process.env.HHPANDA_SELF_TEST !== "1") return;
+  try {
+    const streams = await getHHPandaStreams("https://yanhh3d.ee/tu-tien/muc-than-ky/tap-1.html");
+    console.log("[HHP-SELFTEST] count=" + streams.length);
+    console.log("[HHP-SELFTEST] streams=" + JSON.stringify(streams));
+  } catch (e) {
+    console.error("[HHP-SELFTEST] error", e);
+  }
+}
+runHHPandaSelfTest();
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log("YanHH3D Stremio addon listening on port " + PORT);
 });
