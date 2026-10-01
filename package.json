@@ -5,7 +5,7 @@
   "description": "Stremio addon for YanHH3D donghua catalogs and streams",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "npx playwright install chromium && node server.js",
     "postinstall": "npx playwright install chromium"
   },
   "engines": {
