@@ -583,6 +583,19 @@ async function runStreamFreeDiagnostic() {
               redirect: "follow"
             });
             const js = await sr.text();
+            const mapCandidates = [
+              abs + ".map",
+              abs.replace(/\\.js$/i, ".js.map")
+            ];
+            for (const mapUrl of [...new Set(mapCandidates)]) {
+              try {
+                const mr = await fetch(mapUrl, { headers: { "User-Agent": "Mozilla/5.0", "Referer": url } });
+                const mt = await mr.text();
+                if (mr.ok && mt.length > 100) {
+                  console.log("[SF-DIAG] sourceMap=" + mapUrl + " len=" + mt.length + " head=" + JSON.stringify(mt.slice(0,2000)));
+                }
+              } catch {}
+            }
 
             const terms = ["data-nonce", "hrm-player", "fetch(", "XMLHttpRequest", "/api/", ".php", "m3u8", "nonce", "checksum", "data-uip", "video-id", "stream"];
             const contexts = [];
