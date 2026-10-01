@@ -54,7 +54,10 @@ async function getPlayerFrames(episodeUrl, baseUrl) {
     const frameUrl = new URL(frame, u.href).href;
     if (!/^https:\/\/streamfree\.vip\/embed\//i.test(frameUrl)) continue;
 
-    const widgetId = Buffer.from(frameUrl, "utf8").toString("base64url");
+    // Do not embed StreamFree directly: it can reject requests whose
+    // referrer is not YanHH3D. Embed the original episode page instead,
+    // letting YanHH3D load the StreamFree iframe from its own origin.
+    const widgetId = Buffer.from(episodeUrl, "utf8").toString("base64url");
     results.push({
       name: "YanHH3D • " + label,
       title: label,
